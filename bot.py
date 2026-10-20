@@ -66,7 +66,7 @@ async def entregar_conteudo(user_id, link, nome_jogo):
         except Exception as e:
             print(f"Erro ao copiar: {e}")
             await bot.send_message(user_id, f"📥 **Download:** {link}", parse_mode="Markdown")
-            return False
+            return True
     else:
         await bot.send_message(user_id, f"📥 **Download de {nome_jogo}:**\n{link}", parse_mode="Markdown")
         return True
@@ -435,6 +435,9 @@ async def cb_ck(c):
             if ped[1] == "delivered":
                 await db.rollback()
                 return await c.answer("Este pedido já foi entregue.", show_alert=True)
+            if ped[1] != "pending":
+                await db.rollback()
+                return await c.answer("A entrega deste pedido já está em processamento. Aguarde alguns instantes.", show_alert=True)
             r2 = await db.execute("SELECT nome, link FROM jogos WHERE id = ?", (ped[0],))
             item = await r2.fetchone()
             if not item:
