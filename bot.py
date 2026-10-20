@@ -346,6 +346,9 @@ async def cb_jc(c):
 @dp.callback_query(F.data.startswith("info_"))
 async def cb_in(c):
     jid = c.data.replace("info_", "")
+    if jid == "dash_aurora":
+        await c.answer("O link correto do Aurora ainda não foi cadastrado. Nenhum arquivo foi enviado.", show_alert=True)
+        return
     await c.answer()
     async with aiosqlite.connect(DB) as db:
         res = await db.execute("SELECT nome, preco, desc, cat, link FROM jogos WHERE id = ?", (jid,))
@@ -365,6 +368,9 @@ async def cb_in(c):
 @dp.callback_query(F.data.startswith("getfree_"))
 async def cb_getfree(c):
     jid = c.data.replace("getfree_", "")
+    if jid == "dash_aurora":
+        await c.answer("O link correto do Aurora ainda não foi cadastrado. Nenhum arquivo foi enviado.", show_alert=True)
+        return
     await c.answer("A enviar ficheiro...")
     async with aiosqlite.connect(DB) as db:
         res = await db.execute("SELECT nome, link FROM jogos WHERE id = ?", (jid,))
