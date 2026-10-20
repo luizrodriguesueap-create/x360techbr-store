@@ -337,7 +337,16 @@ async def cb_ct(c):
 
 @dp.callback_query(F.data.startswith("c_"))
 async def cb_jc(c):
-    _, ck, pg = c.data.split("_")
+    # A categoria pode conter underscores; separar apenas a página final.
+    try:
+        ck, pg_txt = c.data[2:].rsplit("_", 1)
+        pg = int(pg_txt)
+    except (ValueError, IndexError):
+        await c.answer("Categoria inválida.", show_alert=True)
+        return
+    if ck not in CATS or pg < 1:
+        await c.answer("Categoria ou página inválida.", show_alert=True)
+        return
     await c.answer()
     mk, tot = await kb_lista(ck, int(pg))
     nom = CATS.get(ck, "Jogos")
