@@ -419,20 +419,44 @@ async def cb_ck(c):
         owner = await (await db.execute("SELECT uid FROM pedidos WHERE pid = ?", (pid,))).fetchone()
     if not owner or owner[0] != c.from_user.id:
         return await c.answer("Este pedido não pertence a sua conta.", show_alert=True)
-    if sdk.payment().get(pid).get("response", {}).get("status") == "approved":
+    try:
+        payment_response = sdk.payment().get(pid).get("response", {})
+    except Exception:
+        return await c.answer("Não consegui consultar o pagamento. Tente novamente.", show_alert=True)
+    if payment_response.get("status") == "approved":
         async with aiosqlite.connect(DB) as db:
-            res = await db.execute("SELECT jid, st FROM pedidos WHERE pid = ?", (pid,))
+            # Validar pedido e marcar entrega dentro de transação para evitar liberações concorrentes.
+            await db.execute("BEGIN IMMEDIATE")
+            res = await db.execute("SELECT jid, st, uid FROM pedidos WHERE pid = ?", (pid,))
             ped = await res.fetchone()
-            if not ped or ped[1] == "delivered":
-                return await c.answer("Ja entregue!", show_alert=True)
+            if not ped or ped[2] != c.from_user.id:
+                await db.rollback()
+                return await c.answer("Pedido não encontrado para sua conta.", show_alert=True)
+            if ped[1] == "delivered":
+                await db.rollback()
+                return await c.answer("Este pedido já foi entregue.", show_alert=True)
             r2 = await db.execute("SELECT nome, link FROM jogos WHERE id = ?", (ped[0],))
-            n, l = await r2.fetchone()
-            await db.execute("UPDATE pedidos SET st = 'delivered' WHERE pid = ?", (pid,))
+            item = await r2.fetchone()
+            if not item:
+                await db.rollback()
+                return await c.answer("O item deste pedido não está disponível. Contacte o suporte.", show_alert=True)
+            n, l = item
+            await db.execute("UPDATE pedidos SET st = 'delivering' WHERE pid = ? AND st = 'pending'", (pid,))
             await db.commit()
-        await c.message.answer(f"🎉 **PAGAMENTO CONFIRMADO!**\n\n🎮 A entregar: **{n}**...")
-        await entregar_conteudo(c.from_user.id, l, n)
+        try:
+            ok = await entregar_conteudo(c.from_user.id, l, n)
+        except Exception as e:
+            print(f"Falha na entrega do pedido {pid}: {e}")
+            ok = False
+        async with aiosqlite.connect(DB) as db:
+            await db.execute("UPDATE pedidos SET st = ? WHERE pid = ?", ("delivered" if ok else "pending", pid))
+            await db.commit()
+        if ok:
+            await c.message.answer(f"🎉 **PAGAMENTO CONFIRMADO!**\n\n🎮 Entrega de **{n}** concluída ou link enviado.")
+        else:
+            await c.message.answer("⚠️ Pagamento confirmado, mas a entrega falhou. Toque em verificar novamente ou contacte o suporte.")
     else:
-        await c.answer("⏳ Aguardando compensacao Pix...", show_alert=True)
+        await c.answer("⏳ Aguardando compensação Pix...", show_alert=True)
 
 @dp.callback_query(F.data == "voltar_ini")
 async def cb_vi(c):
