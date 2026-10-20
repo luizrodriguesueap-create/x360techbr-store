@@ -79,8 +79,8 @@ async def init_db():
         itens = [
             ('abadavatar', 'Desbloqueio AbadAvatar', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Guia e ficheiros para desbloqueio AbadAvatar.'),
             ('rockband', 'Desbloqueio Rock Band', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Ficheiros essenciais para desbloqueio Rock Band.'),
-            ('dash_aurora', 'Aurora', 'dashboards', 0.0, 'https://t.me/c/4434900523/2', 'Interface moderna com capas automaticas.'),
-            ('dash_nexus', 'Nexus', 'dashboards', 0.0, 'https://t.me/c/4434900523/2', 'Dashboard com menus rapidos e plugins.')
+            ('dash_aurora', 'Aurora', 'dashboards', 0.0, '', 'Interface moderna com capas automaticas.'),
+            ('dash_nexus', 'Nexus', 'dashboards', 0.0, '', 'Dashboard com menus rapidos e plugins.')
         ]
         await db.executemany("INSERT INTO jogos VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, link=excluded.link, desc=excluded.desc, preco=excluded.preco", itens)
         await db.commit()
@@ -346,8 +346,9 @@ async def cb_jc(c):
 @dp.callback_query(F.data.startswith("info_"))
 async def cb_in(c):
     jid = c.data.replace("info_", "")
-    if jid == "dash_aurora":
-        await c.answer("O link correto do Aurora ainda não foi cadastrado. Nenhum arquivo foi enviado.", show_alert=True)
+    if jid in ("dash_aurora", "dash_nexus"):
+        nome = "Aurora" if jid == "dash_aurora" else "Nexus"
+        await c.answer(f"O link do {nome} está temporariamente removido. Nenhum arquivo foi enviado.", show_alert=True)
         return
     await c.answer()
     async with aiosqlite.connect(DB) as db:
@@ -368,8 +369,9 @@ async def cb_in(c):
 @dp.callback_query(F.data.startswith("getfree_"))
 async def cb_getfree(c):
     jid = c.data.replace("getfree_", "")
-    if jid == "dash_aurora":
-        await c.answer("O link correto do Aurora ainda não foi cadastrado. Nenhum arquivo foi enviado.", show_alert=True)
+    if jid in ("dash_aurora", "dash_nexus"):
+        nome = "Aurora" if jid == "dash_aurora" else "Nexus"
+        await c.answer(f"O link do {nome} está temporariamente removido. Nenhum arquivo foi enviado.", show_alert=True)
         return
     await c.answer("A enviar ficheiro...")
     async with aiosqlite.connect(DB) as db:
