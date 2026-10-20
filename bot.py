@@ -348,6 +348,7 @@ async def cb_in(c):
         res = await db.execute("SELECT nome, preco, desc, cat, link FROM jogos WHERE id = ?", (jid,))
         row = await res.fetchone()
     if not row:
+        await safe_edit(c, "⚠️ Este item ainda não está cadastrado com um link confirmado. Nenhum download foi iniciado.", IKM(inline_keyboard=[[btn("◀️ Voltar ao Inicio", cb="voltar_ini")]]))
         return
     n, p, d, ck, link = row
     v = "menu_desb" if ck == "gratis" else ("menu_dash" if ck == "dashboards" else f"c_{ck}_1")
