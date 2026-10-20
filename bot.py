@@ -75,14 +75,7 @@ async def init_db():
     async with aiosqlite.connect(DB) as db:
         await db.execute("CREATE TABLE IF NOT EXISTS jogos (id TEXT PRIMARY KEY, nome TEXT, cat TEXT, preco REAL, link TEXT, desc TEXT)")
         await db.execute("CREATE TABLE IF NOT EXISTS pedidos (pid INT PRIMARY KEY, uid INT, jid TEXT, st TEXT)")
-        await db.execute("DELETE FROM jogos WHERE cat IN ('gratis','dashboards') OR id IN ('abadavatar','badavatar','rockband','dash_aurora','dash_nexus') OR nome LIKE '%http%'")
-        itens = [
-            ('abadavatar', 'Desbloqueio AbadAvatar', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Guia e ficheiros para desbloqueio AbadAvatar.'),
-            ('rockband', 'Desbloqueio Rock Band', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Ficheiros essenciais para desbloqueio Rock Band.'),
-            ('dash_aurora', 'Aurora', 'dashboards', 0.0, 'https://t.me/c/4434900523/2', 'Interface moderna com capas automaticas.'),
-            ('dash_nexus', 'Nexus', 'dashboards', 0.0, 'https://t.me/c/4434900523/2', 'Dashboard com menus rapidos e plugins.')
-        ]
-        await db.executemany("INSERT INTO jogos VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, link=excluded.link, desc=excluded.desc, preco=excluded.preco", itens)
+        # Preservar todos os jogos já cadastrados; não limpar nem recriar itens na inicialização.
         await db.commit()
 
 def kb_inicio():
@@ -336,9 +329,18 @@ async def cb_ct(c):
 
 @dp.callback_query(F.data.startswith("c_"))
 async def cb_jc(c):
-    _, ck, pg = c.data.split("_")
+    # Categorias como "mundo_aberto" têm underscore; separar só a página final.
+    try:
+        ck, pg_txt = c.data[2:].rsplit("_", 1)
+        pg = int(pg_txt)
+    except (ValueError, IndexError):
+        await c.answer("Categoria inválida.", show_alert=True)
+        return
+    if ck not in CATS or pg < 1:
+        await c.answer("Categoria ou página inválida.", show_alert=True)
+        return
     await c.answer()
-    mk, tot = await kb_lista(ck, int(pg))
+    mk, tot = await kb_lista(ck, pg)
     nom = CATS.get(ck, "Jogos")
     t = f"📂 **{nom}**" if tot > 0 else f"📂 **{nom}**\n\n_Vazio por enquanto._"
     await safe_edit(c, t, mk)
