@@ -66,7 +66,7 @@ async def entregar_conteudo(user_id, link, nome_jogo):
         except Exception as e:
             print(f"Erro ao copiar: {e}")
             await bot.send_message(user_id, f"📥 **Download:** {link}", parse_mode="Markdown")
-            return False
+            return True
     else:
         await bot.send_message(user_id, f"📥 **Download de {nome_jogo}:**\n{link}", parse_mode="Markdown")
         return True
@@ -75,14 +75,15 @@ async def init_db():
     async with aiosqlite.connect(DB) as db:
         await db.execute("CREATE TABLE IF NOT EXISTS jogos (id TEXT PRIMARY KEY, nome TEXT, cat TEXT, preco REAL, link TEXT, desc TEXT)")
         await db.execute("CREATE TABLE IF NOT EXISTS pedidos (pid INT PRIMARY KEY, uid INT, jid TEXT, st TEXT)")
-        await db.execute("DELETE FROM jogos WHERE cat IN ('gratis','dashboards') OR id IN ('abadavatar','badavatar','rockband','dash_aurora','dash_nexus') OR nome LIKE '%http%'")
+        # Não apagar o catálogo a cada reinicialização: isso removia cadastros gratuitos e dashboards.
         itens = [
             ('abadavatar', 'Desbloqueio AbadAvatar', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Guia e ficheiros para desbloqueio AbadAvatar.'),
             ('rockband', 'Desbloqueio Rock Band', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Ficheiros essenciais para desbloqueio Rock Band.'),
             ('dash_aurora', 'Aurora', 'dashboards', 0.0, 'https://t.me/c/4434900523/2', 'Interface moderna com capas automaticas.'),
             ('dash_nexus', 'Nexus', 'dashboards', 0.0, 'https://t.me/c/4434900523/2', 'Dashboard com menus rapidos e plugins.')
         ]
-        await db.executemany("INSERT INTO jogos VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, link=excluded.link, desc=excluded.desc, preco=excluded.preco", itens)
+        # Inserir itens iniciais apenas se ainda não existirem, preservando alterações feitas pelo administrador.
+        await db.executemany("INSERT OR IGNORE INTO jogos VALUES (?,?,?,?,?,?)", itens)
         await db.commit()
 
 def kb_inicio():
@@ -336,7 +337,16 @@ async def cb_ct(c):
 
 @dp.callback_query(F.data.startswith("c_"))
 async def cb_jc(c):
-    _, ck, pg = c.data.split("_")
+    # A categoria pode conter underscores; separar apenas a página final.
+    try:
+        ck, pg_txt = c.data[2:].rsplit("_", 1)
+        pg = int(pg_txt)
+    except (ValueError, IndexError):
+        await c.answer("Categoria inválida.", show_alert=True)
+        return
+    if ck not in CATS or pg < 1:
+        await c.answer("Categoria ou página inválida.", show_alert=True)
+        return
     await c.answer()
     mk, tot = await kb_lista(ck, int(pg))
     nom = CATS.get(ck, "Jogos")
@@ -385,6 +395,8 @@ async def cb_px(c):
     if not row:
         return
     n, pr = row
+    if sdk is None:
+        return await c.message.answer("⚠️ Pagamentos indisponíveis no momento. Tente novamente mais tarde.")
     await c.message.edit_text("⏳ A ligar ao Mercado Pago...")
     pdata = {
         "transaction_amount": float(pr),
@@ -409,20 +421,54 @@ async def cb_px(c):
 async def cb_ck(c):
     await c.answer("A verificar...")
     pid = int(c.data.split("_")[1])
-    if sdk.payment().get(pid).get("response", {}).get("status") == "approved":
+    if sdk is None:
+        return await c.answer("Pagamentos indisponíveis no momento.", show_alert=True)
+    # Só o comprador associado ao pedido pode consultar/liberar a própria compra.
+    async with aiosqlite.connect(DB) as db:
+        owner = await (await db.execute("SELECT uid FROM pedidos WHERE pid = ?", (pid,))).fetchone()
+    if not owner or owner[0] != c.from_user.id:
+        return await c.answer("Este pedido não pertence a sua conta.", show_alert=True)
+    try:
+        payment_response = sdk.payment().get(pid).get("response", {})
+    except Exception:
+        return await c.answer("Não consegui consultar o pagamento. Tente novamente.", show_alert=True)
+    if payment_response.get("status") == "approved":
         async with aiosqlite.connect(DB) as db:
-            res = await db.execute("SELECT jid, st FROM pedidos WHERE pid = ?", (pid,))
+            # Validar pedido e marcar entrega dentro de transação para evitar liberações concorrentes.
+            await db.execute("BEGIN IMMEDIATE")
+            res = await db.execute("SELECT jid, st, uid FROM pedidos WHERE pid = ?", (pid,))
             ped = await res.fetchone()
-            if not ped or ped[1] == "delivered":
-                return await c.answer("Ja entregue!", show_alert=True)
+            if not ped or ped[2] != c.from_user.id:
+                await db.rollback()
+                return await c.answer("Pedido não encontrado para sua conta.", show_alert=True)
+            if ped[1] == "delivered":
+                await db.rollback()
+                return await c.answer("Este pedido já foi entregue.", show_alert=True)
+            if ped[1] != "pending":
+                await db.rollback()
+                return await c.answer("A entrega deste pedido já está em processamento. Aguarde alguns instantes.", show_alert=True)
             r2 = await db.execute("SELECT nome, link FROM jogos WHERE id = ?", (ped[0],))
-            n, l = await r2.fetchone()
-            await db.execute("UPDATE pedidos SET st = 'delivered' WHERE pid = ?", (pid,))
+            item = await r2.fetchone()
+            if not item:
+                await db.rollback()
+                return await c.answer("O item deste pedido não está disponível. Contacte o suporte.", show_alert=True)
+            n, l = item
+            await db.execute("UPDATE pedidos SET st = 'delivering' WHERE pid = ? AND st = 'pending'", (pid,))
             await db.commit()
-        await c.message.answer(f"🎉 **PAGAMENTO CONFIRMADO!**\n\n🎮 A entregar: **{n}**...")
-        await entregar_conteudo(c.from_user.id, l, n)
+        try:
+            ok = await entregar_conteudo(c.from_user.id, l, n)
+        except Exception as e:
+            print(f"Falha na entrega do pedido {pid}: {e}")
+            ok = False
+        async with aiosqlite.connect(DB) as db:
+            await db.execute("UPDATE pedidos SET st = ? WHERE pid = ?", ("delivered" if ok else "pending", pid))
+            await db.commit()
+        if ok:
+            await c.message.answer(f"🎉 **PAGAMENTO CONFIRMADO!**\n\n🎮 Entrega de **{n}** concluída ou link enviado.")
+        else:
+            await c.message.answer("⚠️ Pagamento confirmado, mas a entrega falhou. Toque em verificar novamente ou contacte o suporte.")
     else:
-        await c.answer("⏳ Aguardando compensacao Pix...", show_alert=True)
+        await c.answer("⏳ Aguardando compensação Pix...", show_alert=True)
 
 @dp.callback_query(F.data == "voltar_ini")
 async def cb_vi(c):
