@@ -77,8 +77,8 @@ async def init_db():
         await db.execute("CREATE TABLE IF NOT EXISTS pedidos (pid INT PRIMARY KEY, uid INT, jid TEXT, st TEXT)")
         await db.execute("DELETE FROM jogos WHERE cat IN ('gratis','dashboards') OR id IN ('abadavatar','badavatar','rockband','dash_aurora','dash_nexus') OR nome LIKE '%http%'")
         itens = [
-            ('abadavatar', 'Desbloqueio AbadAvatar', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Guia e ficheiros para desbloqueio AbadAvatar.'),
-            ('rockband', 'Desbloqueio Rock Band', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Ficheiros essenciais para desbloqueio Rock Band.'),
+            ('abadavatar', 'Desbloqueio AbadAvatar', 'gratis', 0.0, '', 'Guia e ficheiros para desbloqueio AbadAvatar.'),
+            ('rockband', 'Desbloqueio Rock Band', 'gratis', 0.0, '', 'Ficheiros essenciais para desbloqueio Rock Band.'),
             ('dash_aurora', 'Aurora', 'dashboards', 0.0, '', 'Interface moderna com capas automaticas.'),
             ('dash_nexus', 'Nexus', 'dashboards', 0.0, '', 'Dashboard com menus rapidos e plugins.')
         ]
@@ -265,7 +265,7 @@ async def processa_encaminhado(m):
     origin = m.forward_origin
     chat_id = getattr(getattr(origin, "chat", None), "id", None)
     msg_id = getattr(origin, "message_id", None)
-    link = "https://t.me/c/4434900523/2"
+    link = ""
     if chat_id and msg_id:
         c_str = str(chat_id).replace("-100", "").replace("-", "")
         link = f"https://t.me/c/{c_str}/{msg_id}"
@@ -380,6 +380,8 @@ async def cb_getfree(c):
     if not row:
         return
     n, link = row
+    if not link or not link.strip():
+        return await c.answer(f"O link de {n} está temporariamente indisponível. Nenhum arquivo foi enviado.", show_alert=True)
     await c.message.answer(f"📦 A preparar a entrega de: **{n}**...")
     await entregar_conteudo(c.from_user.id, link, n)
 
