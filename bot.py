@@ -75,14 +75,15 @@ async def init_db():
     async with aiosqlite.connect(DB) as db:
         await db.execute("CREATE TABLE IF NOT EXISTS jogos (id TEXT PRIMARY KEY, nome TEXT, cat TEXT, preco REAL, link TEXT, desc TEXT)")
         await db.execute("CREATE TABLE IF NOT EXISTS pedidos (pid INT PRIMARY KEY, uid INT, jid TEXT, st TEXT)")
-        await db.execute("DELETE FROM jogos WHERE cat IN ('gratis','dashboards') OR id IN ('abadavatar','badavatar','rockband','dash_aurora','dash_nexus') OR nome LIKE '%http%'")
+        # Não apagar o catálogo a cada reinicialização: isso removia cadastros gratuitos e dashboards.
         itens = [
             ('abadavatar', 'Desbloqueio AbadAvatar', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Guia e ficheiros para desbloqueio AbadAvatar.'),
             ('rockband', 'Desbloqueio Rock Band', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Ficheiros essenciais para desbloqueio Rock Band.'),
             ('dash_aurora', 'Aurora', 'dashboards', 0.0, 'https://t.me/c/4434900523/2', 'Interface moderna com capas automaticas.'),
             ('dash_nexus', 'Nexus', 'dashboards', 0.0, 'https://t.me/c/4434900523/2', 'Dashboard com menus rapidos e plugins.')
         ]
-        await db.executemany("INSERT INTO jogos VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, link=excluded.link, desc=excluded.desc, preco=excluded.preco", itens)
+        # Inserir itens iniciais apenas se ainda não existirem, preservando alterações feitas pelo administrador.
+        await db.executemany("INSERT OR IGNORE INTO jogos VALUES (?,?,?,?,?,?)", itens)
         await db.commit()
 
 def kb_inicio():
@@ -385,6 +386,8 @@ async def cb_px(c):
     if not row:
         return
     n, pr = row
+    if sdk is None:
+        return await c.message.answer("⚠️ Pagamentos indisponíveis no momento. Tente novamente mais tarde.")
     await c.message.edit_text("⏳ A ligar ao Mercado Pago...")
     pdata = {
         "transaction_amount": float(pr),
@@ -409,6 +412,13 @@ async def cb_px(c):
 async def cb_ck(c):
     await c.answer("A verificar...")
     pid = int(c.data.split("_")[1])
+    if sdk is None:
+        return await c.answer("Pagamentos indisponíveis no momento.", show_alert=True)
+    # Só o comprador associado ao pedido pode consultar/liberar a própria compra.
+    async with aiosqlite.connect(DB) as db:
+        owner = await (await db.execute("SELECT uid FROM pedidos WHERE pid = ?", (pid,))).fetchone()
+    if not owner or owner[0] != c.from_user.id:
+        return await c.answer("Este pedido não pertence a sua conta.", show_alert=True)
     if sdk.payment().get(pid).get("response", {}).get("status") == "approved":
         async with aiosqlite.connect(DB) as db:
             res = await db.execute("SELECT jid, st FROM pedidos WHERE pid = ?", (pid,))
