@@ -76,34 +76,21 @@ async def init_db():
         await db.execute("CREATE TABLE IF NOT EXISTS jogos (id TEXT PRIMARY KEY, nome TEXT, cat TEXT, preco REAL, link TEXT, desc TEXT)")
         await db.execute("CREATE TABLE IF NOT EXISTS pedidos (pid INT PRIMARY KEY, uid INT, jid TEXT, st TEXT)")
         # Não apagar o catálogo a cada reinicialização: isso removia cadastros gratuitos e dashboards.
-        itens = [
-            ('abadavatar', 'Desbloqueio AbadAvatar', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Guia e ficheiros para desbloqueio AbadAvatar.'),
-            ('rockband', 'Desbloqueio Rock Band', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Ficheiros essenciais para desbloqueio Rock Band.'),
-            ('dash_aurora', 'Aurora', 'dashboards', 0.0, 'https://t.me/c/4434900523/2', 'Interface moderna com capas automaticas.'),
-            ('dash_nexus', 'Nexus', 'dashboards', 0.0, 'https://t.me/c/4434900523/2', 'Dashboard com menus rapidos e plugins.')
-        ]
-        # Inserir itens iniciais apenas se ainda não existirem, preservando alterações feitas pelo administrador.
-        await db.executemany("INSERT OR IGNORE INTO jogos VALUES (?,?,?,?,?,?)", itens)
+        # Não criar itens de catálogo com links genéricos: só o administrador cadastra conteúdos reais.
         await db.commit()
 
 def kb_inicio():
     return IKM(inline_keyboard=[
-        [btn("🟢 Desbloqueios (Gratis)", cb="menu_desb")],
-        [btn("🟢 Dashboards (Aurora & Nexus)", cb="menu_dash")],
+        [btn("🟢 Dashboard Nexus", cb="menu_dash")],
         [btn("🔵 Catalogo de Jogos (GOD / XEX)", cb="menu_cat")],
         [btn("🔍 Pesquisar Jogo", cb="ajuda_b"), btn("📖 Como Instalar", cb="tut_inst")]
     ])
 
 def kb_desb():
-    return IKM(inline_keyboard=[
-        [btn("🟢 Desbloqueio AbadAvatar", cb="info_abadavatar")],
-        [btn("🟢 Desbloqueio Rock Band", cb="info_rockband")],
-        [btn("◀️ Voltar ao Inicio", cb="voltar_ini")]
-    ])
+    return IKM(inline_keyboard=[[btn("◀️ Voltar ao Inicio", cb="voltar_ini")]])
 
 def kb_dash():
     return IKM(inline_keyboard=[
-        [btn("🟢 Aurora", cb="info_dash_aurora")],
         [btn("🟢 Nexus", cb="info_dash_nexus")],
         [btn("◀️ Voltar ao Inicio", cb="voltar_ini")]
     ])
@@ -323,12 +310,12 @@ async def cmd_bs(m):
 @dp.callback_query(F.data == "menu_desb")
 async def cb_db(c):
     await c.answer()
-    await safe_edit(c, "🎁 **Desbloqueios Gratuitos:**\nEscolha o metodo:", kb_desb())
+    await safe_edit(c, "🎁 **Desbloqueios Gratuitos**\n\nAinda não há ficheiros confirmados nesta categoria. Vamos adicionar apenas quando os links estiverem testados.", kb_desb())
 
 @dp.callback_query(F.data == "menu_dash")
 async def cb_dh(c):
     await c.answer()
-    await safe_edit(c, "🎁 **Dashboards Gratuitas:**\nEscolha a interface:", kb_dash())
+    await safe_edit(c, "🎁 **Dashboard disponível:**\n\nO catálogo está sendo conferido. Se o Nexus estiver cadastrado com o link correto, ele aparecerá abaixo.", kb_dash())
 
 @dp.callback_query(F.data == "menu_cat")
 async def cb_ct(c):
