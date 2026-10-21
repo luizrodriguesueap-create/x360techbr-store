@@ -16,7 +16,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 DB = "x360_store.db"
 
-TXT_INI = "🎮 **X360 TECH BR**\nSua loja de Xbox 360 em um só lugar.\n\n🕹️ Jogos GOD / XEX\n🎁 Conteúdos gratuitos\n🧩 Dashboards\n\n_Selecione uma opção abaixo._"
+TXT_INI = "🎮 **XBOX 360 STORE**\n━━━━━━━━━━━━━━━━━━\nSua central gamer para Xbox 360.\n\n🟢 Jogos GOD / XEX\n🎁 Conteúdos gratuitos\n🧩 Dashboards e ferramentas\n\n_Selecione uma opção para continuar._"
 
 CATS = {
     "acao": "💥 Acao",
@@ -96,12 +96,13 @@ async def init_db():
         await db.commit()
 
 def kb_inicio():
+    # Menu nativo do Telegram: duas colunas, sem redirecionar para uma página externa.
     return IKM(inline_keyboard=[
-        [btn("🎮 Catálogo de jogos", cb="menu_cat", s="primary")],
-        [btn("🎁 Conteúdos gratuitos", cb="menu_desb", s="success")],
-        [btn("🧩 Dashboards", cb="menu_dash", s="success")],
-        [btn("🔎 Pesquisar", cb="ajuda_b"), btn("📘 Tutorial", cb="tut_inst")],
-        [btn("🛍️ Abrir loja visual", w="https://x360techbr-store.onrender.com")]
+        [btn("🎮 Catálogo", cb="menu_cat", s="primary"),
+         btn("🔎 Pesquisar", cb="ajuda_b")],
+        [btn("🎁 Conteúdos grátis", cb="menu_desb", s="success"),
+         btn("🧩 Dashboards", cb="menu_dash", s="success")],
+        [btn("📘 Tutorial de instalação", cb="tut_inst")],
     ])
 
 def kb_desb():
