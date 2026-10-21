@@ -598,7 +598,7 @@ a{color:inherit;text-decoration:none}button,input,select{font:inherit}.shell{max
 .top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:8px 0 24px;border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:12px;font-weight:850;letter-spacing:.08em}.mark{width:42px;height:42px;border-radius:12px;background:#20392a;color:var(--green);display:grid;place-items:center;font-size:20px;border:1px solid #355a41}.brand small{display:block;font-size:10px;color:var(--muted);letter-spacing:.18em;font-weight:600;margin-top:1px}
 .pill{border:1px solid #34523d;border-radius:999px;color:var(--green2);font-size:12px;padding:8px 12px;white-space:nowrap}
-.hero{padding:54px 0 34px;display:grid;grid-template-columns:1.3fr .7fr;align-items:center;gap:28px}.eyebrow{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--green);font-weight:800}
+.hero{padding:34px 0 30px;display:grid;grid-template-columns:minmax(0,1fr);align-items:center;gap:20px}.eyebrow{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--green);font-weight:800}
 h1{font-size:clamp(36px,6vw,64px);line-height:1.02;letter-spacing:-.045em;margin:14px 0 18px;max-width:650px}h1 span{color:var(--green)}
 .intro{color:#aab4ad;max-width:540px;font-size:16px}.hero-art{min-height:230px;border:1px solid var(--line);border-radius:24px;background:linear-gradient(145deg,#17231b,#111715 58%,#16271c);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
 .hero-art:before,.hero-art:after{content:"";position:absolute;border:1px solid #3c6549;border-radius:50%;width:240px;height:240px;right:-20px;top:-75px}.hero-art:after{width:180px;height:180px;right:10px;top:-45px;border-color:#2b4b35}
