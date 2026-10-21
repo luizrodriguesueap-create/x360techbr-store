@@ -376,6 +376,34 @@ async def cmd_st(m):
         await m.delete()
     except Exception:
         pass
+
+    # Links da vitrine abrem o produto correspondente no bot.
+    partes = (m.text or "").split(maxsplit=1)
+    payload = partes[1].strip() if len(partes) > 1 else ""
+    if payload.startswith("item_"):
+        jid = payload[5:]
+        async with aiosqlite.connect(DB) as db:
+            res = await db.execute("SELECT nome, preco, desc, cat FROM jogos WHERE id = ?", (jid,))
+            row = await res.fetchone()
+        if row:
+            nome, preco, descricao, cat = row
+            if float(preco) == 0:
+                texto = f"🎮 **{nome}**\\n\\n{descricao or 'Conteúdo gratuito.'}\\n\\n**Preço:** GRÁTIS"
+                teclado = IKM(inline_keyboard=[
+                    [btn("🎁 Receber conteúdo", cb=f"getfree_{jid}", s="success")],
+                    [btn("🛍️ Ver catálogo", cb="menu_cat")],
+                    [btn("⌂ Início", cb="voltar_ini")]
+                ])
+            else:
+                texto = f"🎮 **{nome}**\\n\\n{descricao or 'Jogo para Xbox 360.'}\\n\\n**Categoria:** {CATS.get(cat, cat)}\\n**Preço:** R$ {float(preco):.2f}"
+                teclado = IKM(inline_keyboard=[
+                    [btn(f"Comprar via Pix · R$ {float(preco):.2f}", cb=f"pix_{jid}", s="success")],
+                    [btn("🛍️ Ver catálogo", cb="menu_cat")],
+                    [btn("⌂ Início", cb="voltar_ini")]
+                ])
+            await m.answer(texto, reply_markup=teclado, parse_mode="Markdown")
+            return
+
     criar_banner()
     await m.answer_photo(photo=FSInputFile(BANNER_PATH), caption=TXT_INI, reply_markup=kb_inicio(), parse_mode="Markdown")
 
