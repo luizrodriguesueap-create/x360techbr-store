@@ -16,7 +16,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 DB = "x360_store.db"
 
-TXT_INI = "🎮 **XBOX 360 STORE**\n━━━━━━━━━━━━━━━━━━\nSua central gamer para Xbox 360.\n\n🟢 Jogos GOD / XEX\n🎁 Conteúdos gratuitos\n🧩 Dashboards e ferramentas\n\n_Selecione uma opção para continuar._"
+TXT_INI = "🟢 **XBOX 360 STORE**\n━━━━━━━━━━━━━━━━━━\n🎮 _Sua central gamer no Telegram_\n\n▸ Jogos para Xbox 360\n▸ Conteúdos gratuitos\n▸ Dashboards e ferramentas\n\n━━━━━━━━━━━━━━━━━━\n**O que você procura hoje?**"
 
 CATS = {
     "acao": "💥 Acao",
@@ -96,13 +96,13 @@ async def init_db():
         await db.commit()
 
 def kb_inicio():
-    # Menu nativo do Telegram: duas colunas, sem redirecionar para uma página externa.
+    # Menu nativo do Telegram: navegação interna, organizada e sem abrir site externo.
     return IKM(inline_keyboard=[
-        [btn("🎮 Catálogo", cb="menu_cat", s="primary"),
-         btn("🔎 Pesquisar", cb="ajuda_b")],
-        [btn("🎁 Conteúdos grátis", cb="menu_desb", s="success"),
+        [btn("🎮  EXPLORAR JOGOS", cb="menu_cat", s="primary")],
+        [btn("🎁 Gratuitos", cb="menu_desb", s="success"),
          btn("🧩 Dashboards", cb="menu_dash", s="success")],
-        [btn("📘 Tutorial de instalação", cb="tut_inst")],
+        [btn("🔎 Buscar jogo", cb="ajuda_b"),
+         btn("📘 Instalação", cb="tut_inst")],
     ])
 
 def kb_desb():
