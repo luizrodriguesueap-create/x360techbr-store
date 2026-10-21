@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardButton as IKB, InlineKeyboardMarkup as IKM
+from aiogram.types import InlineKeyboardButton as IKB, InlineKeyboardMarkup as IKM, WebAppInfo
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 MP_KEY = os.getenv("MP_ACCESS_TOKEN", "").strip()
@@ -16,7 +16,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 DB = "x360_store.db"
 
-TXT_INI = "🎮 **X360 TECH BR** 🎮\n━━━━━━━━━━━━━━━━━━━━━━\n⚡ **SUA CENTRAL XBOX 360** ⚡\nJogos • Desbloqueios • Dashboards\n━━━━━━━━━━━━━━━━━━━━━━\n🕹️ Jogos nos formatos **GOD / XEX**\n🎁 Conteúdos gratuitos disponíveis\n💳 Pagamento via Pix nos jogos pagos\n📲 Compatível com pendrive e HD\n━━━━━━━━━━━━━━━━━━━━━━\n✨ _Escolha uma opção e bora jogar!_ ✨"
+TXT_INI = "🎮 **X360 TECH BR**\nSua loja de Xbox 360 em um só lugar.\n\n🕹️ Jogos GOD / XEX\n🎁 Conteúdos gratuitos\n🧩 Dashboards\n\n_Selecione uma opção abaixo._"
 
 CATS = {
     "acao": "💥 Acao",
@@ -40,10 +40,12 @@ class FormCadastro(StatesGroup):
     link = State()
     descricao = State()
 
-def btn(t, cb=None, u=None, s=None):
+def btn(t, cb=None, u=None, s=None, w=None):
     kwargs = {"text": t}
     if cb:
         kwargs["callback_data"] = cb
+    elif w:
+        kwargs["web_app"] = WebAppInfo(url=w)
     else:
         kwargs["url"] = u
     if s:
@@ -95,11 +97,11 @@ async def init_db():
 
 def kb_inicio():
     return IKM(inline_keyboard=[
-        [btn("🎮  ABRIR CATÁLOGO DE JOGOS", cb="menu_cat", s="primary")],
-        [btn("🎁  DESBLOQUEIOS GRATUITOS", cb="menu_desb", s="success")],
-        [btn("🧩  DASHBOARDS AURORA / NEXUS", cb="menu_dash", s="success")],
-        [btn("🔎 Pesquisar jogo", cb="ajuda_b"), btn("📘 Tutorial", cb="tut_inst")],
-        [btn("✨ ABRIR LOJA VISUAL", u="https://x360techbr-store.onrender.com")]
+        [btn("🎮 Catálogo de jogos", cb="menu_cat", s="primary")],
+        [btn("🎁 Conteúdos gratuitos", cb="menu_desb", s="success")],
+        [btn("🧩 Dashboards", cb="menu_dash", s="success")],
+        [btn("🔎 Pesquisar", cb="ajuda_b"), btn("📘 Tutorial", cb="tut_inst")],
+        [btn("🛍️ Abrir loja visual", w="https://x360techbr-store.onrender.com")]
     ])
 
 def kb_desb():
@@ -159,14 +161,20 @@ async def kb_lista(ck, pg=1):
     return IKM(inline_keyboard=b), tot
 
 async def safe_edit(cb, text, markup):
+    # Reutiliza a mesma mensagem ao navegar; evita acumular menus no chat.
     try:
         await cb.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
-    except Exception:
-        try:
-            await cb.message.delete()
-            await cb.message.answer(text, reply_markup=markup, parse_mode="Markdown")
-        except Exception:
-            pass
+        return
+    except Exception as e:
+        print(f"Não foi possível editar a mensagem do menu: {e}")
+    try:
+        await cb.message.delete()
+    except Exception as e:
+        print(f"Não foi possível apagar a mensagem anterior: {e}")
+    try:
+        await cb.message.answer(text, reply_markup=markup, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Não foi possível enviar o novo menu: {e}")
 
 @dp.message(Command("stats"))
 @dp.message(Command("total"))
