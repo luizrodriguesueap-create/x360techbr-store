@@ -4,7 +4,8 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardButton as IKB, InlineKeyboardMarkup as IKM, WebAppInfo
+from aiogram.types import InlineKeyboardButton as IKB, InlineKeyboardMarkup as IKM, WebAppInfo, FSInputFile
+from PIL import Image, ImageDraw, ImageFont
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 MP_KEY = os.getenv("MP_ACCESS_TOKEN", "").strip()
@@ -15,8 +16,54 @@ sdk = mercadopago.SDK(MP_KEY) if MP_KEY else None
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 DB = "x360_store.db"
+BANNER_PATH = "x360_banner.png"
 
-TXT_INI = "🟢 **XBOX 360 STORE**\n━━━━━━━━━━━━━━━━━━\n🎮 _Sua central gamer no Telegram_\n\n▸ Jogos para Xbox 360\n▸ Conteúdos gratuitos\n▸ Dashboards e ferramentas\n\n━━━━━━━━━━━━━━━━━━\n**O que você procura hoje?**"
+def criar_banner():
+    """Cria localmente um banner PNG da loja, sem depender de links externos."""
+    if os.path.exists(BANNER_PATH):
+        return
+    largura, altura = 1200, 675
+    img = Image.new("RGB", (largura, altura), "#07110d")
+    draw = ImageDraw.Draw(img)
+
+    # Gradiente escuro com brilho verde discreto.
+    for y in range(altura):
+        t = y / max(1, altura - 1)
+        cor = (int(5 + 2*t), int(19 + 12*t), int(13 + 5*t))
+        draw.line((0, y, largura, y), fill=cor)
+    draw.ellipse((650, -180, 1280, 450), outline="#164c31", width=5)
+    draw.ellipse((700, -130, 1230, 400), outline="#103b27", width=3)
+    draw.ellipse((770, 50, 1160, 440), outline="#0e2d20", width=2)
+    draw.rounded_rectangle((42, 42, largura-42, altura-42), radius=34, outline="#2c9d5e", width=3)
+
+    # Ícone de controle estilizado à direita.
+    draw.rounded_rectangle((760, 235, 1085, 425), radius=78, fill="#10271c", outline="#43f58a", width=5)
+    draw.rounded_rectangle((795, 278, 895, 378), radius=18, fill="#0a1710", outline="#246b42", width=3)
+    draw.rectangle((838, 298, 852, 357), fill="#5cff98")
+    draw.rectangle((815, 320, 875, 334), fill="#5cff98")
+    draw.ellipse((965, 285, 1002, 322), fill="#46f58a")
+    draw.ellipse((1012, 328, 1049, 365), fill="#46f58a")
+    draw.ellipse((966, 350, 1003, 387), fill="#1b8d50")
+    draw.ellipse((1012, 282, 1049, 319), fill="#1b8d50")
+    draw.arc((800, 270, 1045, 410), 195, 345, fill="#6dffa7", width=3)
+
+    try:
+        fonte_titulo = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 67)
+        fonte_sub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 27)
+        fonte_tag = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
+    except OSError:
+        fonte_titulo = fonte_sub = fonte_tag = ImageFont.load_default()
+
+    draw.rounded_rectangle((85, 110, 365, 153), radius=20, fill="#123c27", outline="#2a9e5b", width=2)
+    draw.text((108, 120), "SUA CENTRAL GAMER", font=fonte_tag, fill="#8affb4")
+    draw.text((82, 190), "XBOX 360", font=fonte_titulo, fill="#f4fff8", stroke_width=1, stroke_fill="#0a2416")
+    draw.text((82, 270), "STORE", font=fonte_titulo, fill="#45f58b", stroke_width=1, stroke_fill="#123c27")
+    draw.line((86, 375, 600, 375), fill="#38d978", width=4)
+    draw.text((86, 405), "JOGOS  •  CONTEÚDOS  •  FERRAMENTAS", font=fonte_sub, fill="#c4d9cc")
+    draw.text((86, 510), "GOD / XEX  •  CATÁLOGO NO TELEGRAM", font=fonte_tag, fill="#6cae87")
+    img.save(BANNER_PATH, format="PNG", optimize=True)
+
+TXT_INI = "🟢 **XBOX 360 STORE**\\n━━━━━━━━━━━━━━━━━━\\n🎮 _Sua central gamer no Telegram_\\n\\nEscolha uma opção para explorar o catálogo."
 
 CATS = {
     "acao": "💥 Acao",
@@ -96,13 +143,13 @@ async def init_db():
         await db.commit()
 
 def kb_inicio():
-    # Menu nativo do Telegram: navegação interna, organizada e sem abrir site externo.
+    # Grade 2x2 para as quatro ações principais, mais tutorial numa linha discreta.
     return IKM(inline_keyboard=[
-        [btn("🎮  EXPLORAR JOGOS", cb="menu_cat", s="primary")],
-        [btn("🎁 Gratuitos", cb="menu_desb", s="success"),
-         btn("🧩 Dashboards", cb="menu_dash", s="success")],
-        [btn("🔎 Buscar jogo", cb="ajuda_b"),
-         btn("📘 Instalação", cb="tut_inst")],
+        [btn("🎮 Jogos", cb="menu_cat", s="primary"),
+         btn("🎁 Gratuitos", cb="menu_desb", s="success")],
+        [btn("🧩 Dashboards", cb="menu_dash", s="success"),
+         btn("🔎 Buscar", cb="ajuda_b")],
+        [btn("📘 Tutorial de instalação", cb="tut_inst")],
     ])
 
 def kb_desb():
@@ -162,9 +209,12 @@ async def kb_lista(ck, pg=1):
     return IKM(inline_keyboard=b), tot
 
 async def safe_edit(cb, text, markup):
-    # Reutiliza a mesma mensagem ao navegar; evita acumular menus no chat.
+    # Se o menu tem banner, altera a legenda e preserva a imagem; se não, edita o texto.
     try:
-        await cb.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+        if cb.message.photo:
+            await cb.message.edit_caption(caption=text, reply_markup=markup, parse_mode="Markdown")
+        else:
+            await cb.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
         return
     except Exception as e:
         print(f"Não foi possível editar a mensagem do menu: {e}")
@@ -321,7 +371,8 @@ async def cmd_st(m):
         await m.delete()
     except Exception:
         pass
-    await m.answer(TXT_INI, reply_markup=kb_inicio(), parse_mode="Markdown")
+    criar_banner()
+    await m.answer_photo(photo=FSInputFile(BANNER_PATH), caption=TXT_INI, reply_markup=kb_inicio(), parse_mode="Markdown")
 
 @dp.message(Command("buscar"))
 async def cmd_bs(m):
@@ -486,6 +537,7 @@ def make_web_app():
     return app
 
 async def main():
+    criar_banner()
     await init_db()
     app = make_web_app()
     runner = web.AppRunner(app)
