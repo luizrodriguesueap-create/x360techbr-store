@@ -16,7 +16,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 DB = "x360_store.db"
 
-TXT_INI = "🎮 **X360 TECH BR | Loja Oficial**\n━━━━━━━━━━━━━━━━━━━━━━\n⚡ O seu Xbox 360 no nivel maximo!\n\n🟢 **Entrega Automatica via Pix** (24/7)\n📦 **Formatos:** GOD e XEX p/ Pendrive/HD\n🎁 **Desbloqueios e Dashboards Gratuitos**\n━━━━━━━━━━━━━━━━━━━━━━\n👇 _Toque numa opcao abaixo:_"
+TXT_INI = "🎮 **X360 TECH BR** 🎮\\n━━━━━━━━━━━━━━━━━━━━━━\\n⚡ **SUA CENTRAL XBOX 360** ⚡\\nJogos • Desbloqueios • Dashboards\\n━━━━━━━━━━━━━━━━━━━━━━\\n🕹️ Jogos nos formatos **GOD / XEX**\\n🎁 Conteúdos gratuitos disponíveis\\n💳 Pagamento via Pix nos jogos pagos\\n📲 Compatível com pendrive e HD\\n━━━━━━━━━━━━━━━━━━━━━━\\n✨ _Escolha uma opção e bora jogar!_ ✨"
 
 CATS = {
     "acao": "💥 Acao",
@@ -97,11 +97,12 @@ async def init_db():
         await db.commit()
 
 def kb_inicio():
+    # Hierarquia visual clara; as cores nativas são um extra, pois nem todo cliente as mostra.
     return IKM(inline_keyboard=[
-        [btn("🟢 Desbloqueios (Gratis)", cb="menu_desb", s="success")],
-        [btn("🟢 Dashboards (Aurora & Nexus)", cb="menu_dash", s="success")],
-        [btn("🔵 Catalogo de Jogos (GOD / XEX)", cb="menu_cat", s="primary")],
-        [btn("🔍 Pesquisar Jogo", cb="ajuda_b"), btn("📖 Como Instalar", cb="tut_inst")]
+        [btn("🎮  ABRIR CATÁLOGO DE JOGOS", cb="menu_cat", s="primary")],
+        [btn("🎁  DESBLOQUEIOS GRATUITOS", cb="menu_desb", s="success")],
+        [btn("🧩  DASHBOARDS AURORA / NEXUS", cb="menu_dash", s="success")],
+        [btn("🔎 Pesquisar jogo", cb="ajuda_b"), btn("📘 Tutorial", cb="tut_inst")]
     ])
 
 def kb_desb():
@@ -347,9 +348,12 @@ async def cb_ct(c):
 
 @dp.callback_query(F.data.startswith("c_"))
 async def cb_jc(c):
-    _, ck, pg = c.data.split("_")
+    # Categorias podem conter underscores, por exemplo "mundo_aberto".
+    partes = c.data.split("_")
+    pg = int(partes[-1])
+    ck = "_".join(partes[1:-1])
     await c.answer()
-    mk, tot = await kb_lista(ck, int(pg))
+    mk, tot = await kb_lista(ck, pg)
     nom = CATS.get(ck, "Jogos")
     t = f"📂 **{nom}**" if tot > 0 else f"📂 **{nom}**\n\n_Vazio por enquanto._"
     await safe_edit(c, t, mk)
