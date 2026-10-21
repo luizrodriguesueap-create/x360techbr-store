@@ -4,8 +4,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardButton as IKB, InlineKeyboardMarkup as IKM, WebAppInfo, FSInputFile
-from PIL import Image, ImageDraw, ImageFont
+from aiogram.types import InlineKeyboardButton as IKB, InlineKeyboardMarkup as IKM, WebAppInfo
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 MP_KEY = os.getenv("MP_ACCESS_TOKEN", "").strip()
@@ -19,47 +18,7 @@ DB = "x360_store.db"
 BANNER_PATH = "x360_banner.png"
 
 def criar_banner():
-    """Gera uma capa minimalista da X360 TECH BR no início do bot."""
-    largura, altura = 1200, 675
-    img = Image.new("RGB", (largura, altura), "#0b0f0d")
-    draw = ImageDraw.Draw(img)
-
-    # Fundo grafite com faixa de cor, sem excesso de efeitos.
-    for y in range(altura):
-        t = y / max(1, altura - 1)
-        cor = (int(10 + 3*t), int(16 + 7*t), int(13 + 4*t))
-        draw.line((0, y, largura, y), fill=cor)
-    draw.rectangle((0, 0, largura, 16), fill="#65e69a")
-    draw.rectangle((0, 16, 330, 22), fill="#38bdf8")
-    draw.rounded_rectangle((54, 54, largura-54, altura-54), radius=30, outline="#283a30", width=2)
-
-    # Marca tipográfica à esquerda; símbolo simples à direita.
-    try:
-        fonte_titulo = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 72)
-        fonte_sub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)
-        fonte_tag = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
-    except OSError:
-        fonte_titulo = fonte_sub = fonte_tag = ImageFont.load_default()
-
-    draw.text((86, 116), "X360 TECH BR", font=fonte_titulo, fill="#f4f7f4")
-    draw.rounded_rectangle((88, 220, 440, 270), radius=20, fill="#172b20", outline="#356849", width=1)
-    draw.text((108, 233), "SUA LOJA XBOX 360", font=fonte_tag, fill="#8ee9ae")
-    draw.text((88, 330), "Jogos  •  Conteúdos  •  Ferramentas", font=fonte_sub, fill="#c4cec7")
-    draw.line((88, 395, 600, 395), fill="#65e69a", width=4)
-    draw.text((88, 435), "GOD / XEX  ·  CATÁLOGO NO TELEGRAM", font=fonte_tag, fill="#92a99a")
-
-    # Ícone geométrico discreto de controle.
-    draw.rounded_rectangle((765, 230, 1085, 415), radius=78, fill="#111c16", outline="#3f9e66", width=4)
-    draw.rounded_rectangle((802, 276, 894, 368), radius=18, fill="#0b120e", outline="#2e6443", width=2)
-    draw.rectangle((840, 294, 855, 350), fill="#7de7a3")
-    draw.rectangle((819, 314, 876, 329), fill="#7de7a3")
-    draw.ellipse((954, 278, 991, 315), fill="#65e69a")
-    draw.ellipse((1002, 322, 1039, 359), fill="#65e69a")
-    draw.ellipse((954, 344, 991, 381), fill="#277e4a")
-    draw.ellipse((1002, 278, 1039, 315), fill="#277e4a")
-    img.save(BANNER_PATH, format="PNG", optimize=True)
-
-TXT_INI = "🎮 **X360 TECH BR**\nJogos, conteúdos e ferramentas para Xbox 360.\n\n_Selecione uma opção abaixo._"
+    entas para Xbox 360.\n\n_Selecione uma opção abaixo._"
 
 CATS = {
     "acao": "💥 Acao",
@@ -403,8 +362,7 @@ async def cmd_st(m):
             await m.answer(texto, reply_markup=teclado, parse_mode="Markdown")
             return
 
-    criar_banner()
-    await m.answer_photo(photo=FSInputFile(BANNER_PATH), caption=TXT_INI, reply_markup=kb_inicio(), parse_mode="Markdown")
+    await m.answer(TXT_INI, reply_markup=kb_inicio(), parse_mode="Markdown")
 
 @dp.message(Command("buscar"))
 async def cmd_bs(m):
@@ -679,7 +637,6 @@ def make_web_app():
     return app
 
 async def main():
-    criar_banner()
     await init_db()
     app = make_web_app()
     runner = web.AppRunner(app)
