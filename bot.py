@@ -40,10 +40,22 @@ class FormCadastro(StatesGroup):
     link = State()
     descricao = State()
 
-def btn(t, cb=None, u=None):
+def btn(t, cb=None, u=None, s=None):
+    # Tenta usar o estilo nativo de botão colorido quando suportado.
+    kwargs = {"text": t}
     if cb:
-        return IKB(text=t, callback_data=cb)
-    return IKB(text=t, url=u)
+        kwargs["callback_data"] = cb
+    else:
+        kwargs["url"] = u
+
+    if s:
+        try:
+            return IKB(**kwargs, style=s)
+        except (TypeError, ValueError):
+            # Versões/clientes sem suporte continuam funcionando sem cor.
+            pass
+
+    return IKB(**kwargs)
 
 def slugify(text):
     cleaned = re.sub(r'[^a-zA-Z0-9]+', '_', str(text).strip().lower()).strip('_')
@@ -87,9 +99,9 @@ async def init_db():
 
 def kb_inicio():
     return IKM(inline_keyboard=[
-        [btn("🟢 Desbloqueios (Gratis)", cb="menu_desb")],
-        [btn("🟢 Dashboards (Aurora & Nexus)", cb="menu_dash")],
-        [btn("🔵 Catalogo de Jogos (GOD / XEX)", cb="menu_cat")],
+        [btn("🟢 Desbloqueios (Gratis)", cb="menu_desb", s="success")],
+        [btn("🟢 Dashboards (Aurora & Nexus)", cb="menu_dash", s="success")],
+        [btn("🔵 Catalogo de Jogos (GOD / XEX)", cb="menu_cat", s="primary")],
         [btn("🔍 Pesquisar Jogo", cb="ajuda_b"), btn("📖 Como Instalar", cb="tut_inst")]
     ])
 
