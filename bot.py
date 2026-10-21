@@ -537,14 +537,118 @@ async def cb_ti(c):
 async def cb_np(c):
     await c.answer()
 
+async def api_jogos(request):
+    """Catálogo público da loja visual; retorna somente dados necessários à vitrine."""
+    termo = request.query.get("q", "").strip()[:80]
+    categoria = request.query.get("cat", "").strip()[:40]
+    async with aiosqlite.connect(DB) as db:
+        db.row_factory = aiosqlite.Row
+        sql = "SELECT id, nome, cat, preco, desc FROM jogos WHERE 1=1"
+        args = []
+        if termo:
+            sql += " AND (nome LIKE ? OR desc LIKE ?)"
+            args.extend([f"%{termo}%", f"%{termo}%"])
+        if categoria:
+            sql += " AND cat = ?"
+            args.append(categoria)
+        sql += " ORDER BY CASE WHEN preco = 0 THEN 0 ELSE 1 END, nome COLLATE NOCASE LIMIT 300"
+        cur = await db.execute(sql, args)
+        rows = [dict(row) for row in await cur.fetchall()]
+    return web.json_response({"jogos": rows, "categorias": CATS}, headers={"Cache-Control": "no-store"})
+
+
 async def ping(request):
-    html = "<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"theme-color\" content=\"#07110d\"><title>X360 TECH BR | Loja Gamer</title><style>:root{color-scheme:dark;--g:#39ff88;--b:#39c5ff}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 15% 15%,#103b2a,transparent 40%),radial-gradient(ellipse at 90% 70%,#102d4b,transparent 42%),#07110d;color:#f4fff8;font-family:Arial,sans-serif;display:grid;place-items:center;overflow-x:hidden}body:before{content:\"\";position:fixed;inset:-40%;pointer-events:none;background:conic-gradient(from 0deg,transparent,#39ff8812,transparent,#39c5ff12,transparent);animation:spin 22s linear infinite}.wrap{position:relative;width:min(920px,92vw);padding:28px 0}.logo{font-weight:900;letter-spacing:2px;color:var(--g);text-shadow:0 0 18px #39ff8866}.panel{margin-top:22px;padding:clamp(24px,5vw,54px);border:1px solid #39ff8855;border-radius:28px;background:#07110ddd;box-shadow:0 0 35px #39ff8815;animation:appear .8s ease-out both}.tag{display:inline-block;padding:8px 12px;border:1px solid #39c5ff77;border-radius:999px;color:var(--b);font-size:12px;font-weight:bold;letter-spacing:1.5px}h1{font-size:clamp(34px,7vw,68px);line-height:1.02;margin:20px 0 14px}h1 span{color:var(--g);text-shadow:0 0 25px #39ff8844}p{color:#b8c9c0;line-height:1.7;max-width:650px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:28px 0}.tile{padding:18px;border-radius:16px;background:linear-gradient(135deg,#12251c,#0b1720);border:1px solid #ffffff16;transition:transform .2s,border-color .2s}.tile:hover{transform:translateY(-4px);border-color:#39ff8888}.tile b{display:block;margin:10px 0 5px}.tile small{color:#a6b9af;line-height:1.5}.cta{display:inline-block;text-decoration:none;font-weight:900;color:#04140b;background:linear-gradient(100deg,var(--g),#a2ffce);padding:16px 22px;border-radius:12px;box-shadow:0 0 22px #39ff8833}.note{font-size:12px;color:#7e9689;margin-top:24px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes appear{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}</style></head><body><main class=\"wrap\"><div class=\"logo\">🎮 X360 TECH BR</div><section class=\"panel\"><div class=\"tag\">SUA CENTRAL XBOX 360</div><h1>Seu próximo jogo.<br><span>Sua próxima aventura.</span></h1><p>Um espaço gamer para encontrar jogos de Xbox 360, conteúdos gratuitos e dashboards. Entre pelo bot para navegar no catálogo e acessar as opções disponíveis.</p><div class=\"grid\"><div class=\"tile\"><span style=\"font-size:28px\">🎮</span><b>Catálogo de jogos</b><small>Explore categorias e encontre seu próximo jogo.</small></div><div class=\"tile\"><span style=\"font-size:28px\">🎁</span><b>Conteúdos gratuitos</b><small>Acesse a área de desbloqueios disponíveis.</small></div><div class=\"tile\"><span style=\"font-size:28px\">🧩</span><b>Dashboards</b><small>Conheça as opções Aurora e Nexus.</small></div></div><a class=\"cta\" href=\"https://t.me/Xbox360StoreBot\">🚀 ENTRAR NA LOJA PELO TELEGRAM</a><div class=\"note\">X360 TECH BR · GOD / XEX · Visual otimizado para celular</div></section></main></body></html>"
+    html = r"""<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b0d0c">
+<title>X360 TECH BR — Loja Xbox 360</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0d0c;--panel:#141816;--panel2:#1a201c;--line:#2b342e;--text:#f3f6f3;--muted:#9ca79f;--green:#75e39a;--green2:#b0f5c2}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:inherit;text-decoration:none}button,input,select{font:inherit}.shell{max-width:1180px;margin:auto;padding:22px 20px 56px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:8px 0 24px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:12px;font-weight:850;letter-spacing:.08em}.mark{width:42px;height:42px;border-radius:12px;background:#20392a;color:var(--green);display:grid;place-items:center;font-size:20px;border:1px solid #355a41}.brand small{display:block;font-size:10px;color:var(--muted);letter-spacing:.18em;font-weight:600;margin-top:1px}
+.pill{border:1px solid #34523d;border-radius:999px;color:var(--green2);font-size:12px;padding:8px 12px;white-space:nowrap}
+.hero{padding:54px 0 34px;display:grid;grid-template-columns:1.3fr .7fr;align-items:center;gap:28px}.eyebrow{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--green);font-weight:800}
+h1{font-size:clamp(36px,6vw,64px);line-height:1.02;letter-spacing:-.045em;margin:14px 0 18px;max-width:650px}h1 span{color:var(--green)}
+.intro{color:#aab4ad;max-width:540px;font-size:16px}.hero-art{min-height:230px;border:1px solid var(--line);border-radius:24px;background:linear-gradient(145deg,#17231b,#111715 58%,#16271c);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.hero-art:before,.hero-art:after{content:"";position:absolute;border:1px solid #3c6549;border-radius:50%;width:240px;height:240px;right:-20px;top:-75px}.hero-art:after{width:180px;height:180px;right:10px;top:-45px;border-color:#2b4b35}
+.console{z-index:1;width:180px;height:100px;border:2px solid #6bc98a;border-radius:38px;background:#0c130f;display:flex;align-items:center;justify-content:space-around;transform:rotate(-8deg);box-shadow:0 16px 50px #0008}
+.dpad{width:42px;height:42px;position:relative}.dpad:before,.dpad:after{content:"";position:absolute;background:#8ce9a8;border-radius:3px}.dpad:before{width:13px;height:42px;left:14px}.dpad:after{width:42px;height:13px;top:14px}
+.buttons{width:44px;height:44px;position:relative}.buttons i{position:absolute;width:11px;height:11px;border-radius:50%;background:#8ce9a8}.buttons i:nth-child(1){top:0;left:16px}.buttons i:nth-child(2){top:16px;right:0}.buttons i:nth-child(3){bottom:0;left:16px}.buttons i:nth-child(4){top:16px;left:0}
+.section-head{display:flex;justify-content:space-between;align-items:end;gap:16px;margin:20px 0 16px}.section-head h2{font-size:24px;letter-spacing:-.03em;margin:4px 0}.section-head p{color:var(--muted);margin:0;font-size:13px}
+.tools{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px}.search{flex:1;min-width:200px;background:#121613;border:1px solid var(--line);border-radius:12px;padding:13px 15px;color:var(--text);outline:none}.search:focus,select:focus{border-color:#5eaa76}.filter{background:#121613;border:1px solid var(--line);border-radius:12px;padding:12px;color:var(--text);min-width:160px}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.card{min-width:0;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:var(--panel);transition:border-color .18s,transform .18s}.card:hover{border-color:#477b54;transform:translateY(-3px)}
+.cover{aspect-ratio:4/3;background:linear-gradient(145deg,#213b2a,#111a14 65%,#203e2c);display:flex;align-items:center;justify-content:center;position:relative;padding:16px;text-align:center;overflow:hidden}.cover:before{content:"";position:absolute;width:160px;height:160px;border:1px solid #8ee8a722;border-radius:50%;right:-50px;top:-50px}.cover:after{content:"";position:absolute;width:110px;height:110px;border:1px solid #8ee8a71a;border-radius:50%;left:-45px;bottom:-55px}.cover .initial{font-size:clamp(20px,2vw,32px);font-weight:900;letter-spacing:-.05em;color:#e3f9e9;text-shadow:0 4px 25px #0007;z-index:1;overflow-wrap:anywhere}.free{position:absolute;top:10px;left:10px;font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:800;background:#d6f8df;color:#15311e;border-radius:6px;padding:5px 7px}
+.card-body{padding:14px}.cat{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--green);font-weight:800}.name{font-weight:750;font-size:15px;line-height:1.3;margin:6px 0 14px;min-height:38px;overflow-wrap:anywhere}.card-foot{display:flex;align-items:center;justify-content:space-between;gap:8px}.price{font-size:17px;font-weight:850;white-space:nowrap}.price.free-price{color:var(--green)}.details{border:1px solid #3b5a43;background:#1a2b20;color:#dff9e6;border-radius:9px;padding:8px 10px;font-size:12px;font-weight:750;cursor:pointer}
+.status{grid-column:1/-1;text-align:center;border:1px dashed var(--line);border-radius:16px;padding:35px;color:var(--muted)}.footer{margin-top:44px;border-top:1px solid var(--line);padding-top:20px;color:#77837a;font-size:12px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.modal-bg{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;padding:20px;z-index:10}.modal-bg.open{display:flex}.modal{width:min(480px,100%);background:#151a16;border:1px solid #354238;border-radius:20px;padding:24px;box-shadow:0 20px 80px #0009}.modal h3{font-size:24px;margin:8px 0}.modal p{color:#b1bbb4;white-space:pre-wrap}.modal-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}.primary{display:inline-block;background:var(--green);color:#102015;border:0;border-radius:10px;padding:12px 16px;font-weight:850;cursor:pointer}.secondary{display:inline-block;background:transparent;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:12px 16px;cursor:pointer}
+@media(max-width:900px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}.hero{grid-template-columns:1fr .6fr}.hero-art{min-height:190px}.console{transform:scale(.82) rotate(-8deg)}}
+@media(max-width:640px){.shell{padding:14px 14px 38px}.top{padding-bottom:16px}.brand{font-size:13px}.pill{font-size:10px;padding:7px 9px}.hero{padding:34px 0 26px;grid-template-columns:1fr}.hero-art{display:none}h1{font-size:42px}.intro{font-size:14px}.section-head h2{font-size:21px}.section-head p{display:none}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card-body{padding:11px}.name{font-size:13px;min-height:34px}.price{font-size:15px}.details{padding:7px 8px;font-size:11px}.cover{aspect-ratio:1/1}.filter{min-width:130px;flex:1}.search{min-width:100%;}}
+</style></head>
+<body><main class="shell">
+<header class="top"><div class="brand"><div class="mark">X</div><div>X360 TECH BR<small>LOJA DIGITAL XBOX 360</small></div></div><div class="pill">● CATÁLOGO ONLINE</div></header>
+<section class="hero"><div><div class="eyebrow">Sua próxima aventura começa aqui</div><h1>Encontre seu próximo <span>jogo.</span></h1><p class="intro">Uma vitrine simples para explorar jogos de Xbox 360, descobrir conteúdos gratuitos e encontrar o que você procura.</p></div><div class="hero-art" aria-hidden="true"><div class="console"><div class="dpad"></div><div class="buttons"><i></i><i></i><i></i><i></i></div></div></div></section>
+<section><div class="section-head"><div><div class="eyebrow">Seleção da loja</div><h2>Catálogo de jogos</h2><p id="count">Carregando catálogo…</p></div></div>
+<div class="tools"><input class="search" id="q" type="search" placeholder="Buscar jogo pelo nome…" aria-label="Buscar jogo"><select class="filter" id="cat" aria-label="Filtrar categoria"><option value="">Todas as categorias</option><option value="gratis">Conteúdos gratuitos</option><option value="dashboards">Dashboards</option></select></div>
+<div class="grid" id="games"><div class="status">Carregando jogos…</div></div></section>
+<footer class="footer"><span>© X360 TECH BR</span><span>Catálogo digital · GOD / XEX</span><a href="https://t.me/Xbox360StoreBot">Abrir bot no Telegram ↗</a></footer>
+</main>
+<div class="modal-bg" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-name"><div class="modal"><div class="eyebrow" id="modal-cat">DETALHES DO JOGO</div><h3 id="modal-name"></h3><div class="price" id="modal-price"></div><p id="modal-desc"></p><div class="modal-actions"><a class="primary" id="modal-action" href="https://t.me/Xbox360StoreBot">Continuar no Telegram</a><button class="secondary" id="close">Fechar</button></div></div></div>
+<script>
+const botUrl="https://t.me/Xbox360StoreBot";
+let allGames=[];
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pretty=s=>String(s||"").replaceAll("_"," ").replace(/w/g,c=>c.toUpperCase());
+function render(){
+ const term=document.getElementById("q").value.trim().toLocaleLowerCase("pt-BR");
+ const cat=document.getElementById("cat").value;
+ const list=allGames.filter(g=>(!cat||g.cat===cat)&&(!term||(g.nome+" "+(g.desc||"")).toLocaleLowerCase("pt-BR").includes(term)));
+ document.getElementById("count").textContent=list.length+" item(ns) no catálogo";
+ const target=document.getElementById("games");
+ if(!list.length){target.innerHTML='<div class="status">Nenhum jogo encontrado. Tente outro nome ou categoria.</div>';return}
+ target.innerHTML=list.map(g=>{
+  const free=Number(g.preco)===0;
+  const initial=esc(String(g.nome||"X360").split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase());
+  const price=free?"GRÁTIS":"R$ "+Number(g.preco).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+  return '<article class="card"><div class="cover"><span class="initial">'+initial+'</span>'+(free?'<span class="free">Gratuito</span>':'')+'</div><div class="card-body"><div class="cat">'+esc(pretty(g.cat))+'</div><div class="name">'+esc(g.nome)+'</div><div class="card-foot"><div class="price '+(free?'free-price':'')+'">'+price+'</div><button class="details" data-id="'+esc(g.id)+'">Detalhes</button></div></div></article>';
+ }).join("");
+}
+function openDetails(id){
+ const g=allGames.find(x=>x.id===id);if(!g)return;
+ const free=Number(g.preco)===0;
+ document.getElementById("modal-cat").textContent=pretty(g.cat);
+ document.getElementById("modal-name").textContent=g.nome;
+ document.getElementById("modal-price").textContent=free?"GRÁTIS":"R$ "+Number(g.preco).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+ document.getElementById("modal-desc").textContent=g.desc||"Detalhes deste item serão adicionados em breve.";
+ document.getElementById("modal-action").href=botUrl+"?start=item_"+encodeURIComponent(g.id);
+ document.getElementById("modal-action").textContent=free?"Receber pelo Telegram":"Comprar pelo Telegram";
+ document.getElementById("modal").classList.add("open");
+}
+document.getElementById("games").addEventListener("click",e=>{const b=e.target.closest("[data-id]");if(b)openDetails(b.dataset.id)});
+document.getElementById("q").addEventListener("input",render);
+document.getElementById("cat").addEventListener("change",render);
+document.getElementById("close").addEventListener("click",()=>document.getElementById("modal").classList.remove("open"));
+document.getElementById("modal").addEventListener("click",e=>{if(e.target.id==="modal")e.currentTarget.classList.remove("open")});
+fetch("/api/jogos").then(r=>{if(!r.ok)throw Error("API indisponível");return r.json()}).then(data=>{
+ allGames=data.jogos||[];
+ const select=document.getElementById("cat");
+ const existing=new Set(Array.from(select.options).map(o=>o.value));
+ Object.entries(data.categorias||{}).forEach(([key,label])=>{if(!existing.has(key)){const o=document.createElement("option");o.value=key;o.textContent=label.replace(/^[^\p{L}\p{N}]+/u,"");select.appendChild(o)}});
+ render();
+}).catch(()=>{document.getElementById("games").innerHTML='<div class="status">Não foi possível carregar o catálogo agora. Tente novamente em instantes.</div>';document.getElementById("count").textContent="Catálogo indisponível";});
+</script></body></html>"""
     return web.Response(text=html, content_type="text/html")
+
+
 
 def make_web_app():
     app = web.Application()
     app.router.add_get("/", ping)
-    app.router.add_get("/healthz", ping)
+    app.router.add_get("/api/jogos", api_jogos)
+    app.router.add_get("/healthz", lambda request: web.Response(text="Online!"))
     return app
 
 async def main():
