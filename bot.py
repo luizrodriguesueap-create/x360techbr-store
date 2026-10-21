@@ -16,7 +16,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 DB = "x360_store.db"
 
-TXT_INI = "🎮 **X360 TECH BR | Loja Oficial**\n━━━━━━━━━━━━━━━━━━━━━━\n⚡ O seu Xbox 360 no nivel maximo!\n\n🟢 **Entrega Automatica via Pix** (24/7)\n📦 **Formatos:** GOD e XEX p/ Pendrive/HD\n🎁 **Desbloqueios e Dashboards Gratuitos**\n━━━━━━━━━━━━━━━━━━━━━━\n👇 _Toque numa opcao abaixo:_"
+TXT_INI = "🎮 **X360 TECH BR** 🎮\n━━━━━━━━━━━━━━━━━━━━━━\n⚡ **SUA CENTRAL XBOX 360** ⚡\nJogos • Desbloqueios • Dashboards\n━━━━━━━━━━━━━━━━━━━━━━\n🕹️ Jogos nos formatos **GOD / XEX**\n🎁 Conteúdos gratuitos disponíveis\n💳 Pagamento via Pix nos jogos pagos\n📲 Compatível com pendrive e HD\n━━━━━━━━━━━━━━━━━━━━━━\n✨ _Escolha uma opção e bora jogar!_ ✨"
 
 CATS = {
     "acao": "💥 Acao",
@@ -40,10 +40,22 @@ class FormCadastro(StatesGroup):
     link = State()
     descricao = State()
 
-def btn(t, cb=None, u=None):
+def btn(t, cb=None, u=None, s=None):
+    # Tenta usar o estilo nativo de botão colorido quando suportado.
+    kwargs = {"text": t}
     if cb:
-        return IKB(text=t, callback_data=cb)
-    return IKB(text=t, url=u)
+        kwargs["callback_data"] = cb
+    else:
+        kwargs["url"] = u
+
+    if s:
+        try:
+            return IKB(**kwargs, style=s)
+        except (TypeError, ValueError):
+            # Versões/clientes sem suporte continuam funcionando sem cor.
+            pass
+
+    return IKB(**kwargs)
 
 def slugify(text):
     cleaned = re.sub(r'[^a-zA-Z0-9]+', '_', str(text).strip().lower()).strip('_')
@@ -75,7 +87,6 @@ async def init_db():
     async with aiosqlite.connect(DB) as db:
         await db.execute("CREATE TABLE IF NOT EXISTS jogos (id TEXT PRIMARY KEY, nome TEXT, cat TEXT, preco REAL, link TEXT, desc TEXT)")
         await db.execute("CREATE TABLE IF NOT EXISTS pedidos (pid INT PRIMARY KEY, uid INT, jid TEXT, st TEXT)")
-        await db.execute("DELETE FROM jogos WHERE cat IN ('gratis','dashboards') OR id IN ('abadavatar','badavatar','rockband','dash_aurora','dash_nexus') OR nome LIKE '%http%'")
         itens = [
             ('abadavatar', 'Desbloqueio AbadAvatar', 'gratis', 0.0, '', 'Guia e ficheiros para desbloqueio AbadAvatar.'),
             ('rockband', 'Desbloqueio Rock Band', 'gratis', 0.0, '', 'Ficheiros essenciais para desbloqueio Rock Band.'),
@@ -86,11 +97,13 @@ async def init_db():
         await db.commit()
 
 def kb_inicio():
+    # Hierarquia visual clara; as cores nativas são um extra, pois nem todo cliente as mostra.
     return IKM(inline_keyboard=[
-        [btn("🟢 Desbloqueios (Gratis)", cb="menu_desb")],
-        [btn("🟢 Dashboards (Aurora & Nexus)", cb="menu_dash")],
-        [btn("🔵 Catalogo de Jogos (GOD / XEX)", cb="menu_cat")],
-        [btn("🔍 Pesquisar Jogo", cb="ajuda_b"), btn("📖 Como Instalar", cb="tut_inst")]
+        [btn("🎮  ABRIR CATÁLOGO DE JOGOS", cb="menu_cat", s="primary")],
+        [btn("🎁  DESBLOQUEIOS GRATUITOS", cb="menu_desb", s="success")],
+        [btn("🧩  DASHBOARDS AURORA / NEXUS", cb="menu_dash", s="success")],
+        [btn("🔎 Pesquisar jogo", cb="ajuda_b"), btn("📘 Tutorial", cb="tut_inst")],
+        [btn("✨ ABRIR LOJA VISUAL", u="https://x360techbr-store.onrender.com")]
     ])
 
 def kb_desb():
@@ -336,9 +349,12 @@ async def cb_ct(c):
 
 @dp.callback_query(F.data.startswith("c_"))
 async def cb_jc(c):
-    _, ck, pg = c.data.split("_")
+    # Categorias podem conter underscores, por exemplo "mundo_aberto".
+    partes = c.data.split("_")
+    pg = int(partes[-1])
+    ck = "_".join(partes[1:-1])
     await c.answer()
-    mk, tot = await kb_lista(ck, int(pg))
+    mk, tot = await kb_lista(ck, pg)
     nom = CATS.get(ck, "Jogos")
     t = f"📂 **{nom}**" if tot > 0 else f"📂 **{nom}**\n\n_Vazio por enquanto._"
     await safe_edit(c, t, mk)
@@ -455,7 +471,53 @@ async def cb_np(c):
     await c.answer()
 
 async def ping(request):
-    return web.Response(text="Online!")
+    # Página inicial visual da loja: leve, responsiva e sem dependência de imagens externas.
+    html = """<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#07110d">
+<title>X360 TECH BR | Loja Gamer</title>
+<style>
+:root{color-scheme:dark;--green:#39ff88;--blue:#39c5ff;--bg:#07110d}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 15% 15%,#103b2a 0,transparent 40%),radial-gradient(ellipse at 90% 70%,#102d4b 0,transparent 42%),var(--bg);color:#f4fff8;font-family:Arial,Helvetica,sans-serif;display:grid;place-items:center;overflow-x:hidden}
+body:before{content:"";position:fixed;inset:-40%;pointer-events:none;background:conic-gradient(from 0deg,transparent,#39ff8812,transparent,#39c5ff12,transparent);animation:spin 22s linear infinite}
+.wrap{position:relative;width:min(920px,92vw);padding:28px 0}
+.logo{display:inline-flex;align-items:center;gap:10px;font-weight:900;letter-spacing:2px;color:var(--green);text-shadow:0 0 18px #39ff8866}
+.console{font-size:42px;filter:drop-shadow(0 0 12px #39ff88)}
+.panel{margin-top:22px;padding:clamp(24px,5vw,54px);border:1px solid #39ff8855;border-radius:28px;background:#07110ddd;box-shadow:0 0 35px #39ff8815,inset 0 0 35px #39c5ff08;backdrop-filter:blur(10px);animation:appear .8s ease-out both}
+.tag{display:inline-block;padding:8px 12px;border:1px solid #39c5ff77;border-radius:999px;color:var(--blue);font-size:12px;font-weight:bold;letter-spacing:1.5px}
+h1{font-size:clamp(34px,7vw,68px);line-height:1.02;margin:20px 0 14px;letter-spacing:-2px}
+h1 span{color:var(--green);text-shadow:0 0 25px #39ff8844}
+p{color:#b8c9c0;line-height:1.7;max-width:650px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:28px 0}
+.tile{padding:18px;border-radius:16px;background:linear-gradient(135deg,#12251c,#0b1720);border:1px solid #ffffff16;transition:transform .2s,border-color .2s,box-shadow .2s}
+.tile:hover{transform:translateY(-4px);border-color:#39ff8888;box-shadow:0 8px 24px #39ff8815}
+.tile b{display:block;margin:10px 0 5px}.tile small{color:#a6b9af;line-height:1.5}
+.cta{display:inline-flex;align-items:center;justify-content:center;gap:10px;text-decoration:none;font-weight:900;color:#04140b;background:linear-gradient(100deg,var(--green),#a2ffce);padding:16px 22px;border-radius:12px;box-shadow:0 0 22px #39ff8833;transition:transform .2s,box-shadow .2s}
+.cta:hover{transform:translateY(-2px);box-shadow:0 0 32px #39ff8877}
+.note{font-size:12px;color:#7e9689;margin-top:24px}
+@keyframes spin{to{transform:rotate(360deg)}}@keyframes appear{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body><main class="wrap">
+<div class="logo"><span class="console">🎮</span> X360 TECH BR</div>
+<section class="panel">
+<div class="tag">SUA CENTRAL XBOX 360</div>
+<h1>Seu próximo jogo.<br><span>Sua próxima aventura.</span></h1>
+<p>Um espaço gamer para encontrar jogos de Xbox 360, conteúdos gratuitos e dashboards. Escolha uma opção no nosso bot e prepare o console para jogar.</p>
+<div class="grid">
+<div class="tile"><span style="font-size:28px">🎮</span><b>Catálogo de jogos</b><small>Explore categorias e encontre seu próximo jogo.</small></div>
+<div class="tile"><span style="font-size:28px">🎁</span><b>Conteúdos gratuitos</b><small>Acesse a área de desbloqueios disponíveis.</small></div>
+<div class="tile"><span style="font-size:28px">🧩</span><b>Dashboards</b><small>Conheça as opções Aurora e Nexus.</small></div>
+</div>
+<a class="cta" href="https://t.me/Xbox360StoreBot">🚀 ENTRAR NA LOJA PELO TELEGRAM</a>
+<div class="note">X360 TECH BR · GOD / XEX · Visual otimizado para celular</div>
+</section></main></body></html>"""
+    return web.Response(text=html, content_type="text/html")
 
 def make_web_app():
     app = web.Application()
