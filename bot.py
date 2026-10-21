@@ -63,7 +63,7 @@ def criar_banner():
     draw.text((86, 510), "GOD / XEX  •  CATÁLOGO NO TELEGRAM", font=fonte_tag, fill="#6cae87")
     img.save(BANNER_PATH, format="PNG", optimize=True)
 
-TXT_INI = "🟢 **XBOX 360 STORE**\\n━━━━━━━━━━━━━━━━━━\\n🎮 _Sua central gamer no Telegram_\\n\\nEscolha uma opção para explorar o catálogo."
+TXT_INI = "🟢 **XBOX 360 STORE**\n━━━━━━━━━━━━━━━━━━\n🎮 _Sua central gamer no Telegram_\n\nEscolha uma opção para explorar o catálogo."
 
 CATS = {
     "acao": "💥 Acao",
@@ -467,7 +467,10 @@ async def cb_px(c):
     if not row:
         return
     n, pr = row
-    await c.message.edit_text("⏳ A ligar ao Mercado Pago...")
+    if c.message.photo:
+        await c.message.edit_caption(caption="⏳ A ligar ao Mercado Pago...", reply_markup=None)
+    else:
+        await c.message.edit_text("⏳ A ligar ao Mercado Pago...")
     pdata = {
         "transaction_amount": float(pr),
         "description": f"X360 - {n}",
