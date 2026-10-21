@@ -481,7 +481,10 @@ async def cb_px(c):
         p = sdk.payment().create(pdata).get("response", {})
         pid, px = p["id"], p["point_of_interaction"]["transaction_data"]["qr_code"]
     except Exception as e:
-        return await c.message.edit_text(f"❌ Erro Pix: {e}")
+        erro = f"❌ Erro Pix: {e}"
+        if c.message.photo:
+            return await c.message.edit_caption(caption=erro, reply_markup=None)
+        return await c.message.edit_text(erro)
     async with aiosqlite.connect(DB) as db:
         await db.execute("INSERT INTO pedidos VALUES (?, ?, ?, 'pending')", (pid, c.from_user.id, jid))
         await db.commit()
