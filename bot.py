@@ -388,14 +388,14 @@ async def cmd_st(m):
         if row:
             nome, preco, descricao, cat = row
             if float(preco) == 0:
-                texto = f"🎮 **{nome}**\\n\\n{descricao or 'Conteúdo gratuito.'}\\n\\n**Preço:** GRÁTIS"
+                texto = f"🎮 **{nome}**\n\n{descricao or 'Conteúdo gratuito.'}\n\n**Preço:** GRÁTIS"
                 teclado = IKM(inline_keyboard=[
                     [btn("🎁 Receber conteúdo", cb=f"getfree_{jid}", s="success")],
                     [btn("🛍️ Ver catálogo", cb="menu_cat")],
                     [btn("⌂ Início", cb="voltar_ini")]
                 ])
             else:
-                texto = f"🎮 **{nome}**\\n\\n{descricao or 'Jogo para Xbox 360.'}\\n\\n**Categoria:** {CATS.get(cat, cat)}\\n**Preço:** R$ {float(preco):.2f}"
+                texto = f"🎮 **{nome}**\n\n{descricao or 'Jogo para Xbox 360.'}\n\n**Categoria:** {CATS.get(cat, cat)}\n**Preço:** R$ {float(preco):.2f}"
                 teclado = IKM(inline_keyboard=[
                     [btn(f"Comprar via Pix · R$ {float(preco):.2f}", cb=f"pix_{jid}", s="success")],
                     [btn("🛍️ Ver catálogo", cb="menu_cat")],
@@ -629,7 +629,7 @@ h1{font-size:clamp(36px,6vw,64px);line-height:1.02;letter-spacing:-.045em;margin
 const botUrl="https://t.me/Xbox360StoreBot";
 let allGames=[];
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const pretty=s=>String(s||"").replaceAll("_"," ").replace(/w/g,c=>c.toUpperCase());
+const pretty=s=>String(s||"").replaceAll("_"," ").replace(/\b\w/g,c=>c.toUpperCase());
 function render(){
  const term=document.getElementById("q").value.trim().toLocaleLowerCase("pt-BR");
  const cat=document.getElementById("cat").value;
