@@ -19,51 +19,47 @@ DB = "x360_store.db"
 BANNER_PATH = "x360_banner.png"
 
 def criar_banner():
-    """Cria localmente um banner PNG da loja, sem depender de links externos."""
-    if os.path.exists(BANNER_PATH):
-        return
+    """Gera uma capa minimalista da X360 TECH BR no início do bot."""
     largura, altura = 1200, 675
-    img = Image.new("RGB", (largura, altura), "#07110d")
+    img = Image.new("RGB", (largura, altura), "#0b0f0d")
     draw = ImageDraw.Draw(img)
 
-    # Gradiente escuro com brilho verde discreto.
+    # Fundo grafite com faixa de cor, sem excesso de efeitos.
     for y in range(altura):
         t = y / max(1, altura - 1)
-        cor = (int(5 + 2*t), int(19 + 12*t), int(13 + 5*t))
+        cor = (int(10 + 3*t), int(16 + 7*t), int(13 + 4*t))
         draw.line((0, y, largura, y), fill=cor)
-    draw.ellipse((650, -180, 1280, 450), outline="#164c31", width=5)
-    draw.ellipse((700, -130, 1230, 400), outline="#103b27", width=3)
-    draw.ellipse((770, 50, 1160, 440), outline="#0e2d20", width=2)
-    draw.rounded_rectangle((42, 42, largura-42, altura-42), radius=34, outline="#2c9d5e", width=3)
+    draw.rectangle((0, 0, largura, 16), fill="#65e69a")
+    draw.rectangle((0, 16, 330, 22), fill="#38bdf8")
+    draw.rounded_rectangle((54, 54, largura-54, altura-54), radius=30, outline="#283a30", width=2)
 
-    # Ícone de controle estilizado à direita.
-    draw.rounded_rectangle((760, 235, 1085, 425), radius=78, fill="#10271c", outline="#43f58a", width=5)
-    draw.rounded_rectangle((795, 278, 895, 378), radius=18, fill="#0a1710", outline="#246b42", width=3)
-    draw.rectangle((838, 298, 852, 357), fill="#5cff98")
-    draw.rectangle((815, 320, 875, 334), fill="#5cff98")
-    draw.ellipse((965, 285, 1002, 322), fill="#46f58a")
-    draw.ellipse((1012, 328, 1049, 365), fill="#46f58a")
-    draw.ellipse((966, 350, 1003, 387), fill="#1b8d50")
-    draw.ellipse((1012, 282, 1049, 319), fill="#1b8d50")
-    draw.arc((800, 270, 1045, 410), 195, 345, fill="#6dffa7", width=3)
-
+    # Marca tipográfica à esquerda; símbolo simples à direita.
     try:
-        fonte_titulo = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 67)
-        fonte_sub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 27)
+        fonte_titulo = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 72)
+        fonte_sub = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)
         fonte_tag = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
     except OSError:
         fonte_titulo = fonte_sub = fonte_tag = ImageFont.load_default()
 
-    draw.rounded_rectangle((85, 110, 365, 153), radius=20, fill="#123c27", outline="#2a9e5b", width=2)
-    draw.text((108, 120), "SUA CENTRAL GAMER", font=fonte_tag, fill="#8affb4")
-    draw.text((82, 190), "XBOX 360", font=fonte_titulo, fill="#f4fff8", stroke_width=1, stroke_fill="#0a2416")
-    draw.text((82, 270), "STORE", font=fonte_titulo, fill="#45f58b", stroke_width=1, stroke_fill="#123c27")
-    draw.line((86, 375, 600, 375), fill="#38d978", width=4)
-    draw.text((86, 405), "JOGOS  •  CONTEÚDOS  •  FERRAMENTAS", font=fonte_sub, fill="#c4d9cc")
-    draw.text((86, 510), "GOD / XEX  •  CATÁLOGO NO TELEGRAM", font=fonte_tag, fill="#6cae87")
+    draw.text((86, 116), "X360 TECH BR", font=fonte_titulo, fill="#f4f7f4")
+    draw.rounded_rectangle((88, 220, 440, 270), radius=20, fill="#172b20", outline="#356849", width=1)
+    draw.text((108, 233), "SUA LOJA XBOX 360", font=fonte_tag, fill="#8ee9ae")
+    draw.text((88, 330), "Jogos  •  Conteúdos  •  Ferramentas", font=fonte_sub, fill="#c4cec7")
+    draw.line((88, 395, 600, 395), fill="#65e69a", width=4)
+    draw.text((88, 435), "GOD / XEX  ·  CATÁLOGO NO TELEGRAM", font=fonte_tag, fill="#92a99a")
+
+    # Ícone geométrico discreto de controle.
+    draw.rounded_rectangle((765, 230, 1085, 415), radius=78, fill="#111c16", outline="#3f9e66", width=4)
+    draw.rounded_rectangle((802, 276, 894, 368), radius=18, fill="#0b120e", outline="#2e6443", width=2)
+    draw.rectangle((840, 294, 855, 350), fill="#7de7a3")
+    draw.rectangle((819, 314, 876, 329), fill="#7de7a3")
+    draw.ellipse((954, 278, 991, 315), fill="#65e69a")
+    draw.ellipse((1002, 322, 1039, 359), fill="#65e69a")
+    draw.ellipse((954, 344, 991, 381), fill="#277e4a")
+    draw.ellipse((1002, 278, 1039, 315), fill="#277e4a")
     img.save(BANNER_PATH, format="PNG", optimize=True)
 
-TXT_INI = "🟢 **XBOX 360 STORE**\n━━━━━━━━━━━━━━━━━━\n🎮 _Sua central gamer no Telegram_\n\nEscolha uma opção para explorar o catálogo."
+TXT_INI = "🎮 **X360 TECH BR**\nJogos, conteúdos e ferramentas para Xbox 360.\n\n_Selecione uma opção abaixo._"
 
 CATS = {
     "acao": "💥 Acao",
@@ -143,12 +139,13 @@ async def init_db():
         await db.commit()
 
 def kb_inicio():
-    # Grade 2x2 para as quatro ações principais, mais tutorial numa linha discreta.
+    # Poucas opções, agrupadas por função; tutorial permanece disponível.
     return IKM(inline_keyboard=[
         [btn("🎮 Jogos", cb="menu_cat", s="primary"),
          btn("🎁 Gratuitos", cb="menu_desb", s="success")],
         [btn("🧩 Dashboards", cb="menu_dash", s="success"),
          btn("🔎 Buscar", cb="ajuda_b")],
+        [btn("🛍️ Loja visual", w="https://x360techbr-store.onrender.com")],
         [btn("📘 Tutorial de instalação", cb="tut_inst")],
     ])
 
@@ -209,19 +206,27 @@ async def kb_lista(ck, pg=1):
     return IKM(inline_keyboard=b), tot
 
 async def safe_edit(cb, text, markup):
-    # Se o menu tem banner, altera a legenda e preserva a imagem; se não, edita o texto.
+    # A capa aparece somente no início. Ao entrar nos menus, ela sai para liberar espaço.
+    if cb.message.photo:
+        try:
+            await cb.message.delete()
+        except Exception as e:
+            print(f"Não foi possível remover a capa inicial: {e}")
+        try:
+            await cb.message.answer(text, reply_markup=markup, parse_mode="Markdown")
+        except Exception as e:
+            print(f"Não foi possível enviar o menu: {e}")
+        return
+    # Nas telas seguintes, atualiza a mensagem existente em vez de acumular menus.
     try:
-        if cb.message.photo:
-            await cb.message.edit_caption(caption=text, reply_markup=markup, parse_mode="Markdown")
-        else:
-            await cb.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+        await cb.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
         return
     except Exception as e:
         print(f"Não foi possível editar a mensagem do menu: {e}")
     try:
         await cb.message.delete()
-    except Exception as e:
-        print(f"Não foi possível apagar a mensagem anterior: {e}")
+    except Exception:
+        pass
     try:
         await cb.message.answer(text, reply_markup=markup, parse_mode="Markdown")
     except Exception as e:
