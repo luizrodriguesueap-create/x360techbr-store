@@ -16,7 +16,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 DB = "x360_store.db"
 
-TXT_INI = "🎮 **X360 TECH BR** 🎮\\n━━━━━━━━━━━━━━━━━━━━━━\\n⚡ **SUA CENTRAL XBOX 360** ⚡\\nJogos • Desbloqueios • Dashboards\\n━━━━━━━━━━━━━━━━━━━━━━\\n🕹️ Jogos nos formatos **GOD / XEX**\\n🎁 Conteúdos gratuitos disponíveis\\n💳 Pagamento via Pix nos jogos pagos\\n📲 Compatível com pendrive e HD\\n━━━━━━━━━━━━━━━━━━━━━━\\n✨ _Escolha uma opção e bora jogar!_ ✨"
+TXT_INI = "🎮 **X360 TECH BR** 🎮\n━━━━━━━━━━━━━━━━━━━━━━\n⚡ **SUA CENTRAL XBOX 360** ⚡\nJogos • Desbloqueios • Dashboards\n━━━━━━━━━━━━━━━━━━━━━━\n🕹️ Jogos nos formatos **GOD / XEX**\n🎁 Conteúdos gratuitos disponíveis\n💳 Pagamento via Pix nos jogos pagos\n📲 Compatível com pendrive e HD\n━━━━━━━━━━━━━━━━━━━━━━\n✨ _Escolha uma opção e bora jogar!_ ✨"
 
 CATS = {
     "acao": "💥 Acao",
