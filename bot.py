@@ -145,7 +145,6 @@ def kb_inicio():
          btn("🎁 Gratuitos", cb="menu_desb", s="success")],
         [btn("🧩 Dashboards", cb="menu_dash", s="success"),
          btn("🔎 Buscar", cb="ajuda_b")],
-        [btn("🛍️ Loja visual", w="https://x360techbr-store.onrender.com")],
         [btn("📘 Tutorial de instalação", cb="tut_inst")],
     ])
 
@@ -618,7 +617,7 @@ h1{font-size:clamp(36px,6vw,64px);line-height:1.02;letter-spacing:-.045em;margin
 </style></head>
 <body><main class="shell">
 <header class="top"><div class="brand"><div class="mark">X</div><div>X360 TECH BR<small>LOJA DIGITAL XBOX 360</small></div></div><div class="pill">● CATÁLOGO ONLINE</div></header>
-<section class="hero"><div><div class="eyebrow">Sua próxima aventura começa aqui</div><h1>Encontre seu próximo <span>jogo.</span></h1><p class="intro">Uma vitrine simples para explorar jogos de Xbox 360, descobrir conteúdos gratuitos e encontrar o que você procura.</p></div><div class="hero-art" aria-hidden="true"><div class="console"><div class="dpad"></div><div class="buttons"><i></i><i></i><i></i><i></i></div></div></div></section>
+<section class="hero"><div><div class="eyebrow">Sua próxima aventura começa aqui</div><h1>Encontre seu próximo <span>jogo.</span></h1><p class="intro">Uma vitrine simples para explorar jogos de Xbox 360, descobrir conteúdos gratuitos e encontrar o que você procura.</p></div></section>
 <section><div class="section-head"><div><div class="eyebrow">Seleção da loja</div><h2>Catálogo de jogos</h2><p id="count">Carregando catálogo…</p></div></div>
 <div class="tools"><input class="search" id="q" type="search" placeholder="Buscar jogo pelo nome…" aria-label="Buscar jogo"><select class="filter" id="cat" aria-label="Filtrar categoria"><option value="">Todas as categorias</option><option value="gratis">Conteúdos gratuitos</option><option value="dashboards">Dashboards</option></select></div>
 <div class="grid" id="games"><div class="status">Carregando jogos…</div></div></section>
