@@ -17,8 +17,12 @@ dp = Dispatcher()
 DB = "x360_store.db"
 BANNER_PATH = "x360_banner.png"
 
-def criar_banner():
-    entas para Xbox 360.\n\n_Selecione uma opção abaixo._"
+TXT_INI = (
+    "🎮 **X360 TECH BR — Loja Xbox 360**\n\n"
+    "Jogos digitais, conteúdos gratuitos e dashboards para Xbox 360.\n\n"
+    "_Selecione uma opção abaixo._"
+)
+
 
 CATS = {
     "acao": "💥 Acao",
