@@ -19,7 +19,7 @@ BANNER_PATH = "x360_banner.png"
 
 TXT_INI = (
     "🎮 **X360 TECH BR — Loja Xbox 360**\n\n"
-    "Jogos digitais, conteúdos gratuitos e dashboards para Xbox 360.\n\n"
+    "Jogos digitais para Xbox 360, emuladores de consoles clássicos, conteúdos gratuitos e dashboards.\n\n"
     "_Selecione uma opção abaixo._"
 )
 
@@ -420,7 +420,7 @@ async def cb_menu_emu(c):
             linha.append(btn(itens[i + 1][1], cb=f"e_{itens[i + 1][0]}_1"))
         botoes.append(linha)
     botoes.append([btn("◀️ Voltar ao início", cb="voltar_ini")])
-    await safe_edit(c, "🕹️ **Emuladores e consoles clássicos**\\n\\nEscolha um sistema para ver os itens disponíveis:", IKM(inline_keyboard=botoes))
+    await safe_edit(c, "🕹️ **Emuladores e consoles clássicos**\n\nEscolha um sistema para ver os itens disponíveis:", IKM(inline_keyboard=botoes))
 
 @dp.callback_query(F.data.startswith("e_"))
 async def cb_lista_emulador(c):
@@ -436,7 +436,7 @@ async def cb_lista_emulador(c):
         return
     await c.answer()
     mk, tot = await kb_lista(ck, pg, prefix="e")
-    t = f"🕹️ **{EMULADORES[ck]}**" if tot > 0 else f"🕹️ **{EMULADORES[ck]}**\\n\\n_Catálogo vazio por enquanto._"
+    t = f"🕹️ **{EMULADORES[ck]}**" if tot > 0 else f"🕹️ **{EMULADORES[ck]}**\n\n_Catálogo vazio por enquanto._"
     await safe_edit(c, t, mk)
 
 @dp.callback_query(F.data.startswith("c_"))
@@ -489,7 +489,8 @@ async def cb_getfree(c):
         return
     n, link = row
     if not link or not link.strip():
-        return await c.answer(f"O link de {n} está temporariamente indisponível. Nenhum arquivo foi enviado.", show_alert=True)
+        await c.message.answer(f"⚠️ O link de {n} está temporariamente indisponível. Nenhum arquivo foi enviado.")
+        return
     await c.message.answer(f"📦 A preparar a entrega de: **{n}**...")
     await entregar_conteudo(c.from_user.id, link, n)
 
@@ -538,7 +539,8 @@ async def cb_ck(c):
             res = await db.execute("SELECT jid, st FROM pedidos WHERE pid = ?", (pid,))
             ped = await res.fetchone()
             if not ped or ped[1] == "delivered":
-                return await c.answer("Ja entregue!", show_alert=True)
+                await c.message.answer("ℹ️ Este pedido já foi entregue ou não foi encontrado.")
+                return
             r2 = await db.execute("SELECT nome, link FROM jogos WHERE id = ?", (ped[0],))
             n, l = await r2.fetchone()
             await db.execute("UPDATE pedidos SET st = 'delivered' WHERE pid = ?", (pid,))
@@ -546,7 +548,7 @@ async def cb_ck(c):
         await c.message.answer(f"🎉 **PAGAMENTO CONFIRMADO!**\n\n🎮 A entregar: **{n}**...")
         await entregar_conteudo(c.from_user.id, l, n)
     else:
-        await c.answer("⏳ Aguardando compensacao Pix...", show_alert=True)
+        await c.message.answer("⏳ O pagamento Pix ainda não foi confirmado. Aguarde alguns instantes e tente verificar novamente.")
 
 @dp.callback_query(F.data == "voltar_ini")
 async def cb_vi(c):
@@ -567,6 +569,11 @@ async def cb_ti(c):
 @dp.callback_query(F.data == "noop")
 async def cb_np(c):
     await c.answer()
+
+@dp.callback_query()
+async def cb_desconhecido(c):
+    # Evita que botões antigos ou ainda não implementados fiquem sem resposta.
+    await c.answer("Esta opção ainda não está disponível. Volte ao menu e tente outra opção.", show_alert=True)
 
 async def api_jogos(request):
     """Catálogo público da loja visual; retorna somente dados necessários à vitrine."""
