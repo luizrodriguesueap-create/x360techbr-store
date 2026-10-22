@@ -122,15 +122,15 @@ def kb_inicio():
 
 def kb_desb():
     return IKM(inline_keyboard=[
-        [btn("🟢 Desbloqueio AbadAvatar", cb="info_abadavatar")],
-        [btn("🟢 Desbloqueio Rock Band", cb="info_rockband")],
+        [btn("🟢 Desbloqueio AbadAvatar", cb="info_abadavatar", s="success")],
+        [btn("🟢 Desbloqueio Rock Band", cb="info_rockband", s="success")],
         [btn("◀️ Voltar ao Inicio", cb="voltar_ini")]
     ])
 
 def kb_dash():
     return IKM(inline_keyboard=[
-        [btn("🟢 Aurora", cb="info_dash_aurora")],
-        [btn("🟢 Nexus", cb="info_dash_nexus")],
+        [btn("🟢 Aurora", cb="info_dash_aurora", s="success")],
+        [btn("🟢 Nexus", cb="info_dash_nexus", s="success")],
         [btn("◀️ Voltar ao Inicio", cb="voltar_ini")]
     ])
 
@@ -138,9 +138,9 @@ def kb_categorias():
     k = list(CATS.keys())
     g = []
     for i in range(0, len(k)-1, 2):
-        g.append([btn(CATS[k[i]], cb=f"c_{k[i]}_1"), btn(CATS[k[i+1]], cb=f"c_{k[i+1]}_1")])
+        g.append([btn(CATS[k[i]], cb=f"c_{k[i]}_1", s="success"), btn(CATS[k[i+1]], cb=f"c_{k[i+1]}_1", s="success")])
     if len(k) % 2:
-        g.append([btn(CATS[k[-1]], cb=f"c_{k[-1]}_1")])
+        g.append([btn(CATS[k[-1]], cb=f"c_{k[-1]}_1", s="success")])
     g.append([btn("🟢 Ver Desbloqueios", cb="menu_desb")])
     g.append([btn("◀️ Voltar ao Inicio", cb="voltar_ini")])
     return IKM(inline_keyboard=g)
@@ -165,7 +165,7 @@ async def kb_lista(ck, pg=1, prefix="c"):
         tot = (await c1.fetchone())[0]
         c2 = await db.execute("SELECT id, nome, preco FROM jogos WHERE cat = ? ORDER BY nome ASC LIMIT 6 OFFSET ?", (ck, off))
         rows = await c2.fetchall()
-    b = [[btn(f"🔵 {n} - R$ {p:.2f}", cb=f"info_{i}")] for i, n, p in rows]
+    b = [[btn(f"🟢 {n} - R$ {p:.2f}", cb=f"info_{i}", s="success")] for i, n, p in rows]
     tot_p = max(1, (tot + 5) // 6)
     nav = []
     if pg > 1:
@@ -390,7 +390,7 @@ async def cmd_bs(m):
         rows = await c.fetchall()
     if not rows:
         return await m.answer("Nenhum jogo encontrado.")
-    b = [[btn(f"🔵 {n} - R$ {p:.2f}", cb=f"info_{i}")] for i, n, p in rows]
+    b = [[btn(f"🟢 {n} - R$ {p:.2f}", cb=f"info_{i}", s="success")] for i, n, p in rows]
     b.append([btn("◀️ Voltar ao Inicio", cb="voltar_ini")])
     await m.answer(f"Resultados para: `{t}`", reply_markup=IKM(inline_keyboard=b), parse_mode="Markdown")
 
@@ -415,9 +415,9 @@ async def cb_menu_emu(c):
     botoes = []
     itens = list(EMULADORES.items())
     for i in range(0, len(itens), 2):
-        linha = [btn(itens[i][1], cb=f"e_{itens[i][0]}_1")]
+        linha = [btn(itens[i][1], cb=f"e_{itens[i][0]}_1", s="success")]
         if i + 1 < len(itens):
-            linha.append(btn(itens[i + 1][1], cb=f"e_{itens[i + 1][0]}_1"))
+            linha.append(btn(itens[i + 1][1], cb=f"e_{itens[i + 1][0]}_1", s="success"))
         botoes.append(linha)
     botoes.append([btn("◀️ Voltar ao início", cb="voltar_ini")])
     await safe_edit(c, "🕹️ **Emuladores e consoles clássicos**\n\nEscolha um sistema para ver os itens disponíveis:", IKM(inline_keyboard=botoes))
