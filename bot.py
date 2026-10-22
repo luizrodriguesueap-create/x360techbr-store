@@ -54,6 +54,9 @@ class FormCadastro(StatesGroup):
     link = State()
     descricao = State()
 
+class BuscaJogo(StatesGroup):
+    termo = State()
+
 def btn(t, cb=None, u=None, s=None, w=None):
     kwargs = {"text": t}
     if cb:
@@ -380,19 +383,50 @@ async def cmd_st(m):
 
     await m.answer(TXT_INI, reply_markup=kb_inicio(), parse_mode="Markdown")
 
-@dp.message(Command("buscar"))
-async def cmd_bs(m):
-    t = m.text.replace("/buscar", "").strip()
-    if not t:
-        return await m.answer("Envie: `/buscar nome-do-jogo`", parse_mode="Markdown")
+async def executar_busca(m, termo):
+    termo = (termo or "").strip()
+    if not termo:
+        return await m.answer("Digite o nome do jogo para pesquisar.")
     async with aiosqlite.connect(DB) as db:
-        c = await db.execute("SELECT id, nome, preco FROM jogos WHERE nome LIKE ? LIMIT 8", (f"%{t}%",))
+        c = await db.execute(
+            "SELECT id, nome, preco FROM jogos WHERE nome LIKE ? ORDER BY nome COLLATE NOCASE LIMIT 8",
+            (f"%{termo}%",)
+        )
         rows = await c.fetchall()
     if not rows:
-        return await m.answer("Nenhum jogo encontrado.")
-    b = [[btn(f"🟢 {n} - R$ {p:.2f}", cb=f"info_{i}", s="success")] for i, n, p in rows]
-    b.append([btn("◀️ Voltar ao Inicio", cb="voltar_ini")])
-    await m.answer(f"Resultados para: `{t}`", reply_markup=IKM(inline_keyboard=b), parse_mode="Markdown")
+        return await m.answer(
+            f"🔎 Não encontrei jogos com o nome {termo}.\\n\\nTente outro nome ou confira a escrita.",
+            reply_markup=IKM(inline_keyboard=[[btn("🔎 Buscar outro jogo", cb="ajuda_b")],
+                                             [btn("◀️ Voltar ao início", cb="voltar_ini")]])
+        )
+    b = []
+    for jid, nome, preco in rows:
+        valor = "GRÁTIS" if float(preco) == 0 else f"R$ {float(preco):.2f}"
+        b.append([btn(f"🎮 {nome} - {valor}", cb=f"info_{jid}", s="success")])
+    b.append([btn("🔎 Buscar outro jogo", cb="ajuda_b")])
+    b.append([btn("◀️ Voltar ao início", cb="voltar_ini")])
+    await m.answer(f"🔎 Resultados para: {termo}", reply_markup=IKM(inline_keyboard=b))
+
+@dp.message(Command("buscar"))
+async def cmd_bs(m, state: FSMContext):
+    termo = (m.text or "").partition(" ")[2].strip()
+    if not termo:
+        await state.set_state(BuscaJogo.termo)
+        return await m.answer(
+            "🔎 O que você está procurando?\\n\\n"
+            "Digite apenas o nome do jogo, por exemplo: GTA V."
+        )
+    await state.clear()
+    await executar_busca(m, termo)
+
+@dp.message(BuscaJogo.termo, F.text)
+async def receber_termo_busca(m, state: FSMContext):
+    termo = (m.text or "").strip()
+    if termo.startswith("/"):
+        await state.clear()
+        return await m.answer("Busca cancelada. Para pesquisar, clique em Buscar no menu.")
+    await state.clear()
+    await executar_busca(m, termo)
 
 @dp.callback_query(F.data == "menu_desb")
 async def cb_db(c):
@@ -556,9 +590,17 @@ async def cb_vi(c):
     await safe_edit(c, TXT_INI, kb_inicio())
 
 @dp.callback_query(F.data == "ajuda_b")
-async def cb_ab(c):
+async def cb_ab(c, state: FSMContext):
     await c.answer()
-    await safe_edit(c, "🔍 **Como Pesquisar:**\nEnvie `/buscar` e o nome.\n\nExemplo: `/buscar halo`", IKM(inline_keyboard=[[btn("◀️ Voltar", cb="voltar_ini")]]))
+    await state.set_state(BuscaJogo.termo)
+    await safe_edit(
+        c,
+        "🔎 Buscar jogo\\n\\n"
+        "Digite apenas o nome do jogo que você procura.\\n"
+        "Exemplos: GTA V ou FIFA 19.\\n\\n"
+        "Não precisa digitar nenhum comando.",
+        IKM(inline_keyboard=[[btn("❌ Cancelar busca", cb="voltar_ini")]])
+    )
 
 @dp.callback_query(F.data.startswith("tut_"))
 async def cb_ti(c):
