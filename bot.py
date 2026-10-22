@@ -560,11 +560,47 @@ async def cb_ab(c):
     await c.answer()
     await safe_edit(c, "🔍 **Como Pesquisar:**\nEnvie `/buscar` e o nome.\n\nExemplo: `/buscar halo`", IKM(inline_keyboard=[[btn("◀️ Voltar", cb="voltar_ini")]]))
 
-@dp.callback_query(F.data == "tut_inst")
+@dp.callback_query(F.data.startswith("tut_"))
 async def cb_ti(c):
     await c.answer()
-    t = "📖 **Tutorial Rapido:**\n\n1. Pendrive em FAT32.\n2. **GOD:** em `Content\\0000000000000000`\n3. **XEX:** em `Games`\n4. Abra a Aurora ou Nexus!"
-    await safe_edit(c, t, IKM(inline_keyboard=[[btn("◀️ Voltar", cb="voltar_ini")]]))
+    paginas = {
+        "tut_inst": {
+            "titulo": "📘 **Tutorial de instalação — visão geral**",
+            "texto": "Vamos por etapas! Antes de começar, confirme que o jogo é compatível com seu Xbox 360 desbloqueado e mantenha uma cópia dos arquivos originais.\n\n**Você vai precisar de:**\n• Um pendrive ou HD USB com espaço suficiente.\n• Os arquivos do jogo já extraídos, quando necessário.\n• Uma dashboard, como Aurora ou Nexus, configurada no console.\n\n⚠️ Os passos mudam conforme o formato do jogo. Não misture arquivos GOD e XEX.",
+            "anterior": None, "proxima": "tut_1", "rotulo": "Começar · 1/4"
+        },
+        "tut_1": {
+            "titulo": "🟢 **Etapa 1 — preparar o USB**",
+            "texto": "1. Conecte o pendrive ao computador.\n2. Faça backup de tudo o que deseja guardar: a formatação apaga os dados.\n3. Se for usar FAT32, formate o dispositivo nesse sistema de arquivos. O Windows pode não oferecer FAT32 para unidades grandes; não apague seus dados para tentar contornar isso.\n4. Copie os arquivos do jogo para o USB mantendo a estrutura de pastas indicada para o formato recebido.\n\n**Pronto?** Na próxima etapa, veja como organizar jogos no formato GOD.",
+            "anterior": "tut_inst", "proxima": "tut_2", "rotulo": "Próxima · 2/4"
+        },
+        "tut_2": {
+            "titulo": "📦 **Etapa 2 — jogos no formato GOD**",
+            "texto": "O formato GOD costuma vir em pastas numeradas e arquivos de dados próprios.\n\n1. Localize a pasta do jogo já preparada no formato GOD.\n2. Copie-a preservando a estrutura de diretórios esperada pelo Xbox 360, normalmente dentro de Content/0000000000000000/.\n3. Não renomeie pastas nem mova arquivos internos sem saber a estrutura exigida pelo jogo.\n\n**Importante:** a pasta Content e o identificador do título precisam estar organizados corretamente; copiar apenas arquivos soltos pode impedir que o jogo apareça.",
+            "anterior": "tut_1", "proxima": "tut_3", "rotulo": "Próxima · 3/4"
+        },
+        "tut_3": {
+            "titulo": "🎮 **Etapa 3 — jogos no formato XEX**",
+            "texto": "XEX normalmente é uma pasta de jogo que contém o executável, muitas vezes chamado default.xex, e outros arquivos.\n\n1. Copie a pasta completa do jogo para uma pasta de jogos, por exemplo Games, no dispositivo USB ou no armazenamento configurado.\n2. Não copie somente o default.xex: os demais arquivos e subpastas podem ser necessários.\n3. No console, abra a Aurora ou a dashboard que você utiliza e configure ou atualize o caminho de busca dos jogos, se necessário.\n\nOs nomes dos menus variam conforme a dashboard e a configuração do console.",
+            "anterior": "tut_2", "proxima": "tut_4", "rotulo": "Próxima · 4/4"
+        },
+        "tut_4": {
+            "titulo": "✅ **Etapa 4 — localizar o jogo e resolver problemas**",
+            "texto": "Se o jogo não aparecer na dashboard:\n• Confira se a cópia terminou e se a pasta não ficou duplicada ou incompleta.\n• Verifique se o caminho de busca da dashboard inclui a pasta correta.\n• Atualize ou faça uma nova varredura da biblioteca.\n• Confirme se os arquivos correspondem ao formato GOD ou XEX.\n\nSe continuar sem aparecer, não apague nem formate o armazenamento. Confira a estrutura dos arquivos ou peça ajuda antes de alterar a configuração.\n\n🎮 **Tutorial concluído!** Você pode voltar ao início ou consultar outra etapa.",
+            "anterior": "tut_3", "proxima": None, "rotulo": None
+        }
+    }
+    pagina = paginas.get(c.data, paginas["tut_inst"])
+    botoes = []
+    navegacao = []
+    if pagina["anterior"]:
+        navegacao.append(btn("⬅️ Anterior", cb=pagina["anterior"]))
+    if pagina["proxima"]:
+        navegacao.append(btn("🟢 " + pagina["rotulo"], cb=pagina["proxima"], s="success"))
+    if navegacao:
+        botoes.append(navegacao)
+    botoes.append([btn("⌂ Menu principal", cb="voltar_ini")])
+    await safe_edit(c, pagina["titulo"] + "\n\n" + pagina["texto"], IKM(inline_keyboard=botoes))
 
 @dp.callback_query(F.data == "noop")
 async def cb_np(c):
