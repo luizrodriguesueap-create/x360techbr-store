@@ -19,7 +19,7 @@ BANNER_PATH = "x360_banner.png"
 
 TXT_INI = (
     "🎮 **X360 TECH BR — Loja Xbox 360**\n\n"
-    "Jogos digitais, conteúdos gratuitos e dashboards para Xbox 360.\n\n"
+    "Jogos digitais para Xbox 360, emuladores de consoles clássicos, conteúdos gratuitos e dashboards.\n\n"
     "_Selecione uma opção abaixo._"
 )
 
@@ -37,6 +37,14 @@ CATS = {
     "terror": "🧟 Terror",
     "rpg": "🧙 RPG",
     "kinect": "🕺 Kinect"
+}
+
+EMULADORES = {
+    "snes": "🕹️ Super Nintendo (SNES)",
+    "n64": "🎮 Nintendo 64",
+    "arcade": "👾 Fliperama (Arcade)",
+    "megadrive": "🎮 Mega Drive",
+    "ps1": "💿 PlayStation 1",
 }
 
 class FormCadastro(StatesGroup):
@@ -108,7 +116,8 @@ def kb_inicio():
          btn("🎁 Gratuitos", cb="menu_desb", s="success")],
         [btn("🧩 Dashboards", cb="menu_dash", s="success"),
          btn("🔎 Buscar", cb="ajuda_b")],
-        [btn("📘 Tutorial de instalação", cb="tut_inst")],
+        [btn("🕹️ Emuladores", cb="menu_emu", s="primary"),
+         btn("📘 Tutorial de instalação", cb="tut_inst")],
     ])
 
 def kb_desb():
@@ -137,16 +146,19 @@ def kb_categorias():
     return IKM(inline_keyboard=g)
 
 def kb_escolher_categoria():
-    k = list(CATS.keys())
+    k = list(CATS.keys()) + list(EMULADORES.keys())
     botoes = []
     for i in range(0, len(k)-1, 2):
-        botoes.append([btn(CATS[k[i]], cb=f"selcat_{k[i]}"), btn(CATS[k[i+1]], cb=f"selcat_{k[i+1]}")])
+        botoes.append([
+            btn(CATS.get(k[i], EMULADORES.get(k[i], k[i])), cb=f"selcat_{k[i]}"),
+            btn(CATS.get(k[i+1], EMULADORES.get(k[i+1], k[i+1])), cb=f"selcat_{k[i+1]}")
+        ])
     if len(k) % 2:
-        botoes.append([btn(CATS[k[-1]], cb=f"selcat_{k[-1]}")])
+        botoes.append([btn(CATS.get(k[-1], EMULADORES.get(k[-1], k[-1])), cb=f"selcat_{k[-1]}")])
     botoes.append([btn("❌ Cancelar", cb="cancelar_fsm")])
     return IKM(inline_keyboard=botoes)
 
-async def kb_lista(ck, pg=1):
+async def kb_lista(ck, pg=1, prefix="c"):
     off = (pg - 1) * 6
     async with aiosqlite.connect(DB) as db:
         c1 = await db.execute("SELECT COUNT(*) FROM jogos WHERE cat = ?", (ck,))
@@ -157,14 +169,14 @@ async def kb_lista(ck, pg=1):
     tot_p = max(1, (tot + 5) // 6)
     nav = []
     if pg > 1:
-        nav.append(btn("⬅️ Anterior", cb=f"c_{ck}_{pg-1}"))
+        nav.append(btn("⬅️ Anterior", cb=f"{prefix}_{ck}_{pg-1}"))
     if tot_p > 1:
         nav.append(btn(f"📄 {pg}/{tot_p}", cb="noop"))
     if pg < tot_p:
-        nav.append(btn("Proxima ➡️", cb=f"c_{ck}_{pg+1}"))
+        nav.append(btn("Proxima ➡️", cb=f"{prefix}_{ck}_{pg+1}"))
     if nav:
         b.append(nav)
-    b.append([btn("◀️ Voltar as Categorias", cb="menu_cat")])
+    b.append([btn("◀️ Voltar ao menu", cb="menu_emu" if prefix == "e" else "menu_cat")])
     return IKM(inline_keyboard=b), tot
 
 async def safe_edit(cb, text, markup):
@@ -245,7 +257,7 @@ async def processa_categoria(c, state: FSMContext):
     await state.set_state(FormCadastro.preco)
     await c.answer()
     cancel_kb = IKM(inline_keyboard=[[btn("❌ Cancelar", cb="cancelar_fsm")]])
-    await safe_edit(c, f"📂 Categoria: **{CATS.get(cat, cat)}**\n\nEnvie o preco (ex: `10.00`):", cancel_kb)
+    await safe_edit(c, f"📂 Categoria: **{CATS.get(cat, EMULADORES.get(cat, cat))}**\n\nEnvie o preco (ex: `10.00`):", cancel_kb)
 
 @dp.message(FormCadastro.preco)
 async def processa_preco(m, state: FSMContext):
@@ -280,7 +292,7 @@ async def processa_desc(m, state: FSMContext):
             (data['jid'], data['nome'], data['cat'], data['preco'], data['link'], desc)
         )
         await db.commit()
-    res = f"✅ **Jogo Cadastrado!**\n\n🎮 {data['nome']}\n📂 {CATS.get(data['cat'], data['cat'])}\n💰 R$ {data['preco']:.2f}"
+    res = f"✅ **Jogo Cadastrado!**\n\n🎮 {data['nome']}\n📂 {CATS.get(data['cat'], EMULADORES.get(data['cat'], data['cat']))}\n💰 R$ {data['preco']:.2f}"
     await m.answer(res, reply_markup=kb_inicio(), parse_mode="Markdown")
 
 @dp.message(F.forward_origin)
@@ -397,6 +409,36 @@ async def cb_ct(c):
     await c.answer()
     await safe_edit(c, "📂 **Categorias de Jogos:**", kb_categorias())
 
+@dp.callback_query(F.data == "menu_emu")
+async def cb_menu_emu(c):
+    await c.answer()
+    botoes = []
+    itens = list(EMULADORES.items())
+    for i in range(0, len(itens), 2):
+        linha = [btn(itens[i][1], cb=f"e_{itens[i][0]}_1")]
+        if i + 1 < len(itens):
+            linha.append(btn(itens[i + 1][1], cb=f"e_{itens[i + 1][0]}_1"))
+        botoes.append(linha)
+    botoes.append([btn("◀️ Voltar ao início", cb="voltar_ini")])
+    await safe_edit(c, "🕹️ **Emuladores e consoles clássicos**\n\nEscolha um sistema para ver os itens disponíveis:", IKM(inline_keyboard=botoes))
+
+@dp.callback_query(F.data.startswith("e_"))
+async def cb_lista_emulador(c):
+    partes = c.data.split("_")
+    try:
+        pg = int(partes[-1])
+    except (ValueError, IndexError):
+        await c.answer("Opção inválida.", show_alert=True)
+        return
+    ck = "_".join(partes[1:-1])
+    if ck not in EMULADORES:
+        await c.answer("Sistema não encontrado.", show_alert=True)
+        return
+    await c.answer()
+    mk, tot = await kb_lista(ck, pg, prefix="e")
+    t = f"🕹️ **{EMULADORES[ck]}**" if tot > 0 else f"🕹️ **{EMULADORES[ck]}**\n\n_Catálogo vazio por enquanto._"
+    await safe_edit(c, t, mk)
+
 @dp.callback_query(F.data.startswith("c_"))
 async def cb_jc(c):
     # Categorias podem conter underscores, por exemplo "mundo_aberto".
@@ -423,7 +465,7 @@ async def cb_in(c):
     if not row:
         return
     n, p, d, ck, link = row
-    v = "menu_desb" if ck == "gratis" else ("menu_dash" if ck == "dashboards" else f"c_{ck}_1")
+    v = "menu_desb" if ck == "gratis" else ("menu_dash" if ck == "dashboards" else (f"e_{ck}_1" if ck in EMULADORES else f"c_{ck}_1"))
     if p == 0.0:
         tx = f"🎁 **{n}** (Gratis)\n\n📝 {d}"
         b = [[btn("🟢 Receber Ficheiro Agora", cb=f"getfree_{jid}")], [btn("◀️ Voltar", cb=v)]]
@@ -447,7 +489,8 @@ async def cb_getfree(c):
         return
     n, link = row
     if not link or not link.strip():
-        return await c.answer(f"O link de {n} está temporariamente indisponível. Nenhum arquivo foi enviado.", show_alert=True)
+        await c.message.answer(f"⚠️ O link de {n} está temporariamente indisponível. Nenhum arquivo foi enviado.")
+        return
     await c.message.answer(f"📦 A preparar a entrega de: **{n}**...")
     await entregar_conteudo(c.from_user.id, link, n)
 
@@ -496,7 +539,8 @@ async def cb_ck(c):
             res = await db.execute("SELECT jid, st FROM pedidos WHERE pid = ?", (pid,))
             ped = await res.fetchone()
             if not ped or ped[1] == "delivered":
-                return await c.answer("Ja entregue!", show_alert=True)
+                await c.message.answer("ℹ️ Este pedido já foi entregue ou não foi encontrado.")
+                return
             r2 = await db.execute("SELECT nome, link FROM jogos WHERE id = ?", (ped[0],))
             n, l = await r2.fetchone()
             await db.execute("UPDATE pedidos SET st = 'delivered' WHERE pid = ?", (pid,))
@@ -504,7 +548,7 @@ async def cb_ck(c):
         await c.message.answer(f"🎉 **PAGAMENTO CONFIRMADO!**\n\n🎮 A entregar: **{n}**...")
         await entregar_conteudo(c.from_user.id, l, n)
     else:
-        await c.answer("⏳ Aguardando compensacao Pix...", show_alert=True)
+        await c.message.answer("⏳ O pagamento Pix ainda não foi confirmado. Aguarde alguns instantes e tente verificar novamente.")
 
 @dp.callback_query(F.data == "voltar_ini")
 async def cb_vi(c):
@@ -526,6 +570,11 @@ async def cb_ti(c):
 async def cb_np(c):
     await c.answer()
 
+@dp.callback_query()
+async def cb_desconhecido(c):
+    # Evita que botões antigos ou ainda não implementados fiquem sem resposta.
+    await c.answer("Esta opção ainda não está disponível. Volte ao menu e tente outra opção.", show_alert=True)
+
 async def api_jogos(request):
     """Catálogo público da loja visual; retorna somente dados necessários à vitrine."""
     termo = request.query.get("q", "").strip()[:80]
@@ -543,7 +592,7 @@ async def api_jogos(request):
         sql += " ORDER BY CASE WHEN preco = 0 THEN 0 ELSE 1 END, nome COLLATE NOCASE LIMIT 300"
         cur = await db.execute(sql, args)
         rows = [dict(row) for row in await cur.fetchall()]
-    return web.json_response({"jogos": rows, "categorias": CATS}, headers={"Cache-Control": "no-store"})
+    return web.json_response({"jogos": rows, "categorias": {**CATS, **EMULADORES}}, headers={"Cache-Control": "no-store"})
 
 
 async def ping(request):
