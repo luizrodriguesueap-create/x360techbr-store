@@ -599,7 +599,7 @@ async def cb_ab(c, state: FSMContext):
         "Digite apenas o nome do jogo que você procura.\\n"
         "Exemplos: GTA V ou FIFA 19.\\n\\n"
         "Não precisa digitar nenhum comando.",
-        IKM(inline_keyboard=[[btn("❌ Cancelar busca", cb="voltar_ini")]])
+        IKM(inline_keyboard=[[btn("❌ Cancelar busca", cb="cancelar_busca")]])
     )
 
 @dp.callback_query(F.data.startswith("tut_"))
@@ -643,6 +643,12 @@ async def cb_ti(c):
         botoes.append(navegacao)
     botoes.append([btn("⌂ Menu principal", cb="voltar_ini")])
     await safe_edit(c, pagina["titulo"] + "\n\n" + pagina["texto"], IKM(inline_keyboard=botoes))
+
+@dp.callback_query(F.data == "cancelar_busca")
+async def cb_cancelar_busca(c, state: FSMContext):
+    await state.clear()
+    await c.answer("Busca cancelada.")
+    await safe_edit(c, TXT_INI, kb_inicio())
 
 @dp.callback_query(F.data == "noop")
 async def cb_np(c):
