@@ -595,9 +595,9 @@ async def cb_ab(c, state: FSMContext):
     await state.set_state(BuscaJogo.termo)
     await safe_edit(
         c,
-        "🔎 Buscar jogo\\n\\n"
-        "Digite apenas o nome do jogo que você procura.\\n"
-        "Exemplos: GTA V ou FIFA 19.\\n\\n"
+        "🔎 Buscar jogo\n\n"
+        "Digite apenas o nome do jogo que você procura.\n"
+        "Exemplos: GTA V ou FIFA 19.\n\n"
         "Não precisa digitar nenhum comando.",
         IKM(inline_keyboard=[[btn("❌ Cancelar busca", cb="cancelar_busca")]])
     )
