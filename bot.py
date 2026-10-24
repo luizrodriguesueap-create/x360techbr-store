@@ -1,4 +1,4 @@
-import os, asyncio, urllib.parse, aiosqlite, mercadopago, re
+import os, asyncio, urllib.parse, aiosqlite, mercadopago, re, time
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
@@ -16,6 +16,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 DB = "x360_store.db"
 BANNER_PATH = "x360_banner.png"
+START_TIME = time.monotonic()
 
 TXT_INI = (
     "🎮 **X360 TECH BR — Loja Xbox 360**\n\n"
@@ -240,6 +241,62 @@ async def cmd_estatisticas(m):
         t += "_Nenhum jogo pago cadastrado._\n"
     t += "━━━━━━━━━━━━━━━━━━━━━"
     await m.answer(t, parse_mode="Markdown")
+
+@dp.message(Command("saude"))
+@dp.message(Command("status"))
+async def cmd_saude(m):
+    # Comando restrito ao administrador: diagnóstico sem expor credenciais.
+    if m.from_user.id != ADMIN_ID:
+        return
+    try:
+        async with aiosqlite.connect(DB) as db:
+            res = await db.execute(
+                "SELECT COUNT(*), "
+                "SUM(CASE WHEN preco > 0 THEN 1 ELSE 0 END), "
+                "SUM(CASE WHEN preco = 0 THEN 1 ELSE 0 END) FROM jogos"
+            )
+            total, pagos, gratuitos = await res.fetchone()
+            res = await db.execute("SELECT st, COUNT(*) FROM pedidos GROUP BY st")
+            estados = dict(await res.fetchall())
+
+        segundos = max(0, int(time.monotonic() - START_TIME))
+        dias, resto = divmod(segundos, 86400)
+        horas, resto = divmod(resto, 3600)
+        minutos = resto // 60
+        if dias:
+            uptime = f"{dias}d {horas}h {minutos}min"
+        elif horas:
+            uptime = f"{horas}h {minutos}min"
+        else:
+            uptime = f"{minutos}min"
+
+        total = total or 0
+        pagos = pagos or 0
+        gratuitos = gratuitos or 0
+        pendentes = estados.get("pending", 0)
+        em_entrega = estados.get("delivering", 0)
+        pix = "configurado" if MP_KEY else "não configurado"
+
+        texto = (
+            "🩺 **Saúde da X360 TECH BR**\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🟢 Processo do bot: ativo\n"
+            f"⏱️ Tempo desde a última inicialização: {uptime}\n"
+            f"🎮 Itens no catálogo: {total}\n"
+            f"💰 Itens pagos: {pagos}\n"
+            f"🎁 Itens gratuitos: {gratuitos}\n"
+            f"🧾 Pedidos aguardando pagamento: {pendentes}\n"
+            f"📦 Pedidos em entrega: {em_entrega}\n"
+            f"💳 Mercado Pago: {pix}\n"
+            "━━━━━━━━━━━━━━━━━━━━"
+        )
+        await m.answer(texto, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Erro no comando administrativo /saude: {e}")
+        await m.answer(
+            "⚠️ Não consegui consultar todos os indicadores agora. "
+            "Verifique os registros do serviço."
+        )
 
 @dp.message(Command("cadastrar"))
 async def cmd_iniciar_cadastro(m, state: FSMContext):
