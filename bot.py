@@ -120,7 +120,7 @@ async def init_db():
             ('dash_aurora', 'Aurora', 'dashboards', 0.0, '', 'Interface moderna com capas automaticas.'),
             ('dash_nexus', 'Nexus', 'dashboards', 0.0, '', 'Dashboard com menus rapidos e plugins.')
         ]
-        await db.executemany("INSERT INTO jogos VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, link=excluded.link, desc=excluded.desc, preco=excluded.preco", itens)
+        await db.executemany("INSERT OR IGNORE INTO jogos VALUES (?,?,?,?,?,?)", itens)
         await db.commit()
 
 def kb_inicio():
@@ -590,11 +590,14 @@ async def cb_getfree(c):
         return
     await c.answer("A enviar ficheiro...")
     async with aiosqlite.connect(DB) as db:
-        res = await db.execute("SELECT nome, link FROM jogos WHERE id = ?", (jid,))
+        res = await db.execute("SELECT nome, link, preco FROM jogos WHERE id = ?", (jid,))
         row = await res.fetchone()
     if not row:
         return
-    n, link = row
+    n, link, preco = row
+    if float(preco) > 0:
+        await c.answer("Este item é pago. Use o botão de compra via Pix.", show_alert=True)
+        return
     if not link or not link.strip():
         await c.message.answer(f"⚠️ O link de {n} está temporariamente indisponível. Nenhum arquivo foi enviado.")
         return
@@ -635,7 +638,7 @@ async def cb_px(c):
         "payer": {"email": f"c{c.from_user.id}@gmail.com", "first_name": c.from_user.first_name or "Gamer"}
     }
     try:
-        response = sdk.payment().create(pdata).get("response", {})
+        response = (await asyncio.to_thread(sdk.payment().create, pdata)).get("response", {})
         pid = response["id"]
         px = response["point_of_interaction"]["transaction_data"]["qr_code"]
     except Exception as e:
@@ -695,7 +698,7 @@ async def cb_ck(c):
         return
 
     try:
-        payment = sdk.payment().get(pid).get("response", {})
+        payment = (await asyncio.to_thread(sdk.payment().get, pid)).get("response", {})
     except Exception as e:
         print(f"Erro ao consultar pagamento {pid}: {e}")
         await c.answer("Não consegui consultar o Pix. Tente novamente.", show_alert=True)
@@ -894,11 +897,11 @@ h1{font-size:clamp(36px,6vw,64px);line-height:1.02;letter-spacing:-.045em;margin
 <section><div class="section-head"><div><div class="eyebrow">Seleção da loja</div><h2>Catálogo de jogos</h2><p id="count">Carregando catálogo…</p></div></div>
 <div class="tools"><input class="search" id="q" type="search" placeholder="Buscar jogo pelo nome…" aria-label="Buscar jogo"><select class="filter" id="cat" aria-label="Filtrar categoria"><option value="">Todas as categorias</option><option value="gratis">Conteúdos gratuitos</option><option value="dashboards">Dashboards</option></select></div>
 <div class="grid" id="games"><div class="status">Carregando jogos…</div></div></section>
-<footer class="footer"><span>© X360 TECH BR</span><span>Catálogo digital · GOD / XEX</span><a href="https://t.me/Xbox360StoreBot">Abrir bot no Telegram ↗</a></footer>
+<footer class="footer"><span>© X360 TECH BR</span><span>Catálogo digital · GOD / XEX</span><a href="https://t.me/x360techbr_bot">Abrir bot no Telegram ↗</a></footer>
 </main>
-<div class="modal-bg" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-name"><div class="modal"><div class="eyebrow" id="modal-cat">DETALHES DO JOGO</div><h3 id="modal-name"></h3><div class="price" id="modal-price"></div><p id="modal-desc"></p><div class="modal-actions"><a class="primary" id="modal-action" href="https://t.me/Xbox360StoreBot">Continuar no Telegram</a><button class="secondary" id="close">Fechar</button></div></div></div>
+<div class="modal-bg" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-name"><div class="modal"><div class="eyebrow" id="modal-cat">DETALHES DO JOGO</div><h3 id="modal-name"></h3><div class="price" id="modal-price"></div><p id="modal-desc"></p><div class="modal-actions"><a class="primary" id="modal-action" href="https://t.me/x360techbr_bot">Continuar no Telegram</a><button class="secondary" id="close">Fechar</button></div></div></div>
 <script>
-const botUrl="https://t.me/Xbox360StoreBot";
+const botUrl="https://t.me/x360techbr_bot";
 let allGames=[];
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const pretty=s=>String(s||"").replaceAll("_"," ").replace(/\b\w/g,c=>c.toUpperCase());
