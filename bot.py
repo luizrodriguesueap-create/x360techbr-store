@@ -1,4 +1,5 @@
 import os, asyncio, urllib.parse, aiosqlite, mercadopago, re, time
+from pathlib import Path
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
@@ -132,6 +133,7 @@ def kb_inicio():
          btn("🔎 Buscar", cb="ajuda_b")],
         [btn("🕹️ Emuladores", cb="menu_emu", s="primary"),
          btn("📘 Tutorial de instalação", cb="tut_inst")],
+        [btn("✨ Abrir loja futurista", w="https://x360techbr-store.onrender.com/app", s="success")],
     ])
 
 def kb_desb():
@@ -962,9 +964,15 @@ fetch("/api/jogos").then(r=>{if(!r.ok)throw Error("API indisponível");return r.
 
 
 
+async def miniapp(request):
+    """Interface Mini App experimental, separada da vitrine atual."""
+    arquivo = Path(__file__).with_name("miniapp.html")
+    return web.FileResponse(arquivo, headers={"Cache-Control": "no-store"})
+
 def make_web_app():
     app = web.Application()
     app.router.add_get("/", ping)
+    app.router.add_get("/app", miniapp)
     app.router.add_get("/api/jogos", api_jogos)
     app.router.add_get("/healthz", lambda request: web.Response(text="Online!"))
     return app
