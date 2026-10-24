@@ -96,13 +96,13 @@ async def entregar_conteudo(user_id, link, nome_jogo):
             print(f"Erro ao copiar o conteúdo de {nome_jogo}: {e}")
             # Se a cópia falhar, enviar o link como alternativa também conta como entrega.
             try:
-                await bot.send_message(user_id, f"📥 Download de {nome_jogo}:\\n{link}")
+                await bot.send_message(user_id, f"📥 Download de {nome_jogo}:\n{link}")
                 return True
             except Exception as fallback_error:
                 print(f"Falha ao enviar link alternativo de {nome_jogo}: {fallback_error}")
                 return False
     try:
-        await bot.send_message(user_id, f"📥 Download de {nome_jogo}:\\n{link}")
+        await bot.send_message(user_id, f"📥 Download de {nome_jogo}:\n{link}")
         return True
     except Exception as e:
         print(f"Falha ao enviar link de {nome_jogo}: {e}")
@@ -498,7 +498,7 @@ async def cb_jc(c):
     await c.answer()
     mk, tot = await kb_lista(ck, pg)
     nom = CATS[ck]
-    t = f"📂 **{nom}**" if tot > 0 else f"📂 **{nom}**\\n\\n_Vazio por enquanto._"
+    t = f"📂 **{nom}**" if tot > 0 else f"📂 **{nom}**\n\n_Vazio por enquanto._"
     await safe_edit(c, t, mk)
 
 @dp.callback_query(F.data.startswith("info_"))
@@ -606,7 +606,7 @@ async def cb_px(c):
         pass
     await c.message.answer_photo(
         photo=qr,
-        caption=f"🎮 **{n}**\\n💰 R$ {float(pr):.2f}\\n\\n`{px}`",
+        caption=f"🎮 **{n}**\n💰 R$ {float(pr):.2f}\n\n`{px}`",
         reply_markup=kb,
         parse_mode="Markdown"
     )
@@ -688,7 +688,7 @@ async def cb_ck(c):
         )
         await db.commit()
     if ok:
-        await c.message.answer(f"🎉 **Pagamento confirmado!**\\n\\nA entrega de **{nome}** foi concluída ou o link foi enviado.")
+        await c.message.answer(f"🎉 **Pagamento confirmado!**\n\nA entrega de **{nome}** foi concluída ou o link foi enviado.")
     else:
         await c.message.answer("⚠️ O pagamento foi confirmado, mas a entrega não foi concluída. Tente verificar novamente ou fale com o suporte.")
 
