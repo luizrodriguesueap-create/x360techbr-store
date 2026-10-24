@@ -821,6 +821,10 @@ h1{font-size:clamp(36px,6vw,64px);line-height:1.02;letter-spacing:-.045em;margin
 .secondary:hover{border-color:#75e39a;background:#1c261f}
 .details:active,.primary:active,.secondary:active{transform:translateY(0) scale(.97);box-shadow:none}
 .details:focus-visible,.primary:focus-visible,.secondary:focus-visible{outline:2px solid #b0f5c2;outline-offset:3px}
+.details,.primary,.secondary{position:relative;overflow:hidden;isolation:isolate}
+.click-ripple{position:absolute;border-radius:50%;pointer-events:none;background:rgba(142,232,167,.32);transform:scale(0);animation:button-ripple .58s ease-out forwards;z-index:0}
+@keyframes button-ripple{to{transform:scale(18);opacity:0}}
+@media(prefers-reduced-motion:reduce){.details,.primary,.secondary{transition:none;will-change:auto}.details:hover,.primary:hover,.secondary:hover,.details:active,.primary:active,.secondary:active{transform:none}.click-ripple{display:none}}
 @media(prefers-reduced-motion:reduce){.details,.primary,.secondary{transition:none;will-change:auto}.details:hover,.primary:hover,.secondary:hover,.details:active,.primary:active,.secondary:active{transform:none}}
 .status{grid-column:1/-1;text-align:center;border:1px dashed var(--line);border-radius:16px;padding:35px;color:var(--muted)}.footer{margin-top:44px;border-top:1px solid var(--line);padding-top:20px;color:#77837a;font-size:12px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .modal-bg{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;padding:20px;z-index:10}.modal-bg.open{display:flex}.modal{width:min(480px,100%);background:#151a16;border:1px solid #354238;border-radius:20px;padding:24px;box-shadow:0 20px 80px #0009}.modal h3{font-size:24px;margin:8px 0}.modal p{color:#b1bbb4;white-space:pre-wrap}.modal-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}.primary{display:inline-block;background:var(--green);color:#102015;border:0;border-radius:10px;padding:12px 16px;font-weight:850;cursor:pointer}.secondary{display:inline-block;background:transparent;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:12px 16px;cursor:pointer}
@@ -867,6 +871,21 @@ function openDetails(id){
  document.getElementById("modal").classList.add("open");
 }
 document.getElementById("games").addEventListener("click",e=>{const b=e.target.closest("[data-id]");if(b)openDetails(b.dataset.id)});
+document.addEventListener("pointerdown",e=>{
+ const b=e.target.closest(".details,.primary,.secondary");
+ if(!b||window.matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+ const rect=b.getBoundingClientRect();
+ const size=Math.max(rect.width,rect.height)*1.15;
+ b.querySelectorAll(".click-ripple").forEach(r=>r.remove());
+ const ripple=document.createElement("span");
+ ripple.className="click-ripple";
+ ripple.style.width=ripple.style.height=size+"px";
+ ripple.style.left=(e.clientX-rect.left-size/2)+"px";
+ ripple.style.top=(e.clientY-rect.top-size/2)+"px";
+ b.appendChild(ripple);
+ ripple.addEventListener("animationend",()=>ripple.remove(),{once:true});
+});
+
 document.getElementById("q").addEventListener("input",render);
 document.getElementById("cat").addEventListener("change",render);
 document.getElementById("close").addEventListener("click",()=>document.getElementById("modal").classList.remove("open"));
