@@ -835,7 +835,7 @@ async def api_jogos(request):
     categoria = request.query.get("cat", "").strip()[:40]
     async with aiosqlite.connect(DB) as db:
         db.row_factory = aiosqlite.Row
-        sql = "SELECT id, nome, cat, preco, desc FROM jogos WHERE 1=1"
+        sql = "SELECT id, nome, cat, preco, desc, CASE WHEN link IS NOT NULL AND TRIM(link) != '' THEN 1 ELSE 0 END AS disponivel FROM jogos WHERE 1=1"
         args = []
         if termo:
             sql += " AND (nome LIKE ? OR desc LIKE ?)"
