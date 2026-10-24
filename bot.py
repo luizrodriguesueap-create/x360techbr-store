@@ -120,7 +120,7 @@ async def init_db():
             ('dash_aurora', 'Aurora', 'dashboards', 0.0, '', 'Interface moderna com capas automaticas.'),
             ('dash_nexus', 'Nexus', 'dashboards', 0.0, '', 'Dashboard com menus rapidos e plugins.')
         ]
-        await db.executemany("INSERT INTO jogos VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, link=excluded.link, desc=excluded.desc, preco=excluded.preco", itens)
+        await db.executemany("INSERT OR IGNORE INTO jogos VALUES (?,?,?,?,?,?)", itens)
         await db.commit()
 
 def kb_inicio():
@@ -590,11 +590,14 @@ async def cb_getfree(c):
         return
     await c.answer("A enviar ficheiro...")
     async with aiosqlite.connect(DB) as db:
-        res = await db.execute("SELECT nome, link FROM jogos WHERE id = ?", (jid,))
+        res = await db.execute("SELECT nome, link, preco FROM jogos WHERE id = ?", (jid,))
         row = await res.fetchone()
     if not row:
         return
-    n, link = row
+    n, link, preco = row
+    if float(preco) > 0:
+        await c.answer("Este item é pago. Use o botão de compra via Pix.", show_alert=True)
+        return
     if not link or not link.strip():
         await c.message.answer(f"⚠️ O link de {n} está temporariamente indisponível. Nenhum arquivo foi enviado.")
         return
