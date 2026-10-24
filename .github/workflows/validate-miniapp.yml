@@ -1,0 +1,33 @@
+name: Validate Mini App
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [feature/miniapp-particle-dissolve]
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check Python syntax
+        run: python -m py_compile bot.py
+      - name: Check Mini App JavaScript syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path("miniapp.html").read_text(encoding="utf-8")
+          scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.S)
+          if len(scripts) != 1:
+              raise SystemExit(f"Expected one inline script, found {len(scripts)}")
+          Path("/tmp/miniapp.js").write_text(scripts[0], encoding="utf-8")
+          PY
+          node --check /tmp/miniapp.js
