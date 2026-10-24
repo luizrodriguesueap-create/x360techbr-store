@@ -85,18 +85,28 @@ def parse_tg_link(link):
     return None, None
 
 async def entregar_conteudo(user_id, link, nome_jogo):
+    if not link or not str(link).strip():
+        return False
     chat_id, msg_id = parse_tg_link(link)
     if chat_id and msg_id:
         try:
             await bot.copy_message(chat_id=user_id, from_chat_id=chat_id, message_id=msg_id)
             return True
         except Exception as e:
-            print(f"Erro ao copiar: {e}")
-            await bot.send_message(user_id, f"📥 **Download:** {link}", parse_mode="Markdown")
-            return False
-    else:
-        await bot.send_message(user_id, f"📥 **Download de {nome_jogo}:**\n{link}", parse_mode="Markdown")
+            print(f"Erro ao copiar o conteúdo de {nome_jogo}: {e}")
+            # Se a cópia falhar, enviar o link como alternativa também conta como entrega.
+            try:
+                await bot.send_message(user_id, f"📥 Download de {nome_jogo}:\\n{link}")
+                return True
+            except Exception as fallback_error:
+                print(f"Falha ao enviar link alternativo de {nome_jogo}: {fallback_error}")
+                return False
+    try:
+        await bot.send_message(user_id, f"📥 Download de {nome_jogo}:\\n{link}")
         return True
+    except Exception as e:
+        print(f"Falha ao enviar link de {nome_jogo}: {e}")
+        return False
 
 async def init_db():
     async with aiosqlite.connect(DB) as db:
