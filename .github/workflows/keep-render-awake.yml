@@ -1,0 +1,20 @@
+name: Keep X360 TECH BR awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Check Render health endpoint
+        run: |
+          curl --fail --silent --show-error --location \
+            --max-time 20 --retry 2 --retry-delay 5 \
+            https://x360techbr-store.onrender.com/healthz
