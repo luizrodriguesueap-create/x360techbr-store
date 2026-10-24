@@ -395,7 +395,7 @@ async def executar_busca(m, termo):
         rows = await c.fetchall()
     if not rows:
         return await m.answer(
-            f"🔎 Não encontrei jogos com o nome {termo}.\\n\\nTente outro nome ou confira a escrita.",
+            f"🔎 Não encontrei jogos com o nome {termo}.\n\nTente outro nome ou confira a escrita.",
             reply_markup=IKM(inline_keyboard=[[btn("🔎 Buscar outro jogo", cb="ajuda_b")],
                                              [btn("◀️ Voltar ao início", cb="voltar_ini")]])
         )
@@ -413,7 +413,7 @@ async def cmd_bs(m, state: FSMContext):
     if not termo:
         await state.set_state(BuscaJogo.termo)
         return await m.answer(
-            "🔎 O que você está procurando?\\n\\n"
+            "🔎 O que você está procurando?\n\n"
             "Digite apenas o nome do jogo, por exemplo: GTA V."
         )
     await state.clear()
@@ -475,14 +475,20 @@ async def cb_lista_emulador(c):
 
 @dp.callback_query(F.data.startswith("c_"))
 async def cb_jc(c):
-    # Categorias podem conter underscores, por exemplo "mundo_aberto".
-    partes = c.data.split("_")
-    pg = int(partes[-1])
-    ck = "_".join(partes[1:-1])
+    # Categorias podem conter underscores, como "mundo_aberto".
+    try:
+        ck, pg_txt = c.data[2:].rsplit("_", 1)
+        pg = int(pg_txt)
+    except (ValueError, IndexError):
+        await c.answer("Categoria inválida.", show_alert=True)
+        return
+    if ck not in CATS or pg < 1:
+        await c.answer("Categoria ou página inválida.", show_alert=True)
+        return
     await c.answer()
     mk, tot = await kb_lista(ck, pg)
-    nom = CATS.get(ck, "Jogos")
-    t = f"📂 **{nom}**" if tot > 0 else f"📂 **{nom}**\n\n_Vazio por enquanto._"
+    nom = CATS[ck]
+    t = f"📂 **{nom}**" if tot > 0 else f"📂 **{nom}**\\n\\n_Vazio por enquanto._"
     await safe_edit(c, t, mk)
 
 @dp.callback_query(F.data.startswith("info_"))
@@ -530,18 +536,31 @@ async def cb_getfree(c):
 
 @dp.callback_query(F.data.startswith("pix_"))
 async def cb_px(c):
-    jid = c.data.replace("pix_", "")
-    await c.answer("A gerar Pix...")
+    jid = c.data[4:]
+    if sdk is None:
+        await c.answer("Pagamentos indisponíveis no momento.", show_alert=True)
+        return
     async with aiosqlite.connect(DB) as db:
-        res = await db.execute("SELECT nome, preco FROM jogos WHERE id = ?", (jid,))
+        res = await db.execute("SELECT nome, preco, link FROM jogos WHERE id = ?", (jid,))
         row = await res.fetchone()
     if not row:
+        await c.answer("Jogo não encontrado.", show_alert=True)
         return
-    n, pr = row
-    if c.message.photo:
-        await c.message.edit_caption(caption="⏳ A ligar ao Mercado Pago...", reply_markup=None)
-    else:
-        await c.message.edit_text("⏳ A ligar ao Mercado Pago...")
+    n, pr, link = row
+    if float(pr) <= 0:
+        await c.answer("Este item não precisa de pagamento.", show_alert=True)
+        return
+    if not link or not link.strip():
+        await c.answer("O link deste jogo ainda não está cadastrado. Nenhum Pix foi gerado.", show_alert=True)
+        return
+    await c.answer("Gerando Pix...")
+    try:
+        if c.message.photo:
+            await c.message.edit_caption(caption="⏳ Conectando ao Mercado Pago...", reply_markup=None)
+        else:
+            await c.message.edit_text("⏳ Conectando ao Mercado Pago...")
+    except Exception:
+        pass
     pdata = {
         "transaction_amount": float(pr),
         "description": f"X360 - {n}",
@@ -549,40 +568,119 @@ async def cb_px(c):
         "payer": {"email": f"c{c.from_user.id}@gmail.com", "first_name": c.from_user.first_name or "Gamer"}
     }
     try:
-        p = sdk.payment().create(pdata).get("response", {})
-        pid, px = p["id"], p["point_of_interaction"]["transaction_data"]["qr_code"]
+        response = sdk.payment().create(pdata).get("response", {})
+        pid = response["id"]
+        px = response["point_of_interaction"]["transaction_data"]["qr_code"]
     except Exception as e:
-        erro = f"❌ Erro Pix: {e}"
-        if c.message.photo:
-            return await c.message.edit_caption(caption=erro, reply_markup=None)
-        return await c.message.edit_text(erro)
+        print(f"Erro ao gerar Pix para {jid}: {e}")
+        erro = "Não foi possível gerar o Pix agora. Tente novamente em instantes."
+        try:
+            if c.message.photo:
+                await c.message.edit_caption(caption=f"❌ {erro}", reply_markup=None)
+            else:
+                await c.message.edit_text(f"❌ {erro}")
+        except Exception:
+            await c.message.answer(f"❌ {erro}")
+        return
     async with aiosqlite.connect(DB) as db:
         await db.execute("INSERT INTO pedidos VALUES (?, ?, ?, 'pending')", (pid, c.from_user.id, jid))
         await db.commit()
     qr = f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&data={urllib.parse.quote(px)}"
-    kb = IKM(inline_keyboard=[[btn("🟢 Ja Paguei (Liberar Download)", cb=f"chk_{pid}")], [btn("◀️ Cancelar", cb="voltar_ini")]])
-    await c.message.delete()
-    await c.message.answer_photo(photo=qr, caption=f"🎮 **{n}**\n💰 R$ {pr:.2f}\n\n`{px}`", reply_markup=kb, parse_mode="Markdown")
+    kb = IKM(inline_keyboard=[
+        [btn("🟢 Já paguei — verificar", cb=f"chk_{pid}")],
+        [btn("◀️ Voltar ao início", cb="voltar_ini")]
+    ])
+    try:
+        await c.message.delete()
+    except Exception:
+        pass
+    await c.message.answer_photo(
+        photo=qr,
+        caption=f"🎮 **{n}**\\n💰 R$ {float(pr):.2f}\\n\\n`{px}`",
+        reply_markup=kb,
+        parse_mode="Markdown"
+    )
 
 @dp.callback_query(F.data.startswith("chk_"))
 async def cb_ck(c):
-    await c.answer("A verificar...")
-    pid = int(c.data.split("_")[1])
-    if sdk.payment().get(pid).get("response", {}).get("status") == "approved":
-        async with aiosqlite.connect(DB) as db:
-            res = await db.execute("SELECT jid, st FROM pedidos WHERE pid = ?", (pid,))
-            ped = await res.fetchone()
-            if not ped or ped[1] == "delivered":
-                await c.message.answer("ℹ️ Este pedido já foi entregue ou não foi encontrado.")
-                return
-            r2 = await db.execute("SELECT nome, link FROM jogos WHERE id = ?", (ped[0],))
-            n, l = await r2.fetchone()
-            await db.execute("UPDATE pedidos SET st = 'delivered' WHERE pid = ?", (pid,))
-            await db.commit()
-        await c.message.answer(f"🎉 **PAGAMENTO CONFIRMADO!**\n\n🎮 A entregar: **{n}**...")
-        await entregar_conteudo(c.from_user.id, l, n)
+    if sdk is None:
+        await c.answer("Pagamentos indisponíveis no momento.", show_alert=True)
+        return
+    try:
+        pid = int(c.data[4:])
+    except (ValueError, TypeError):
+        await c.answer("Pedido inválido.", show_alert=True)
+        return
+
+    # Conferir a titularidade antes de consultar ou liberar qualquer pedido.
+    async with aiosqlite.connect(DB) as db:
+        row = await (await db.execute(
+            "SELECT uid, jid, st FROM pedidos WHERE pid = ?", (pid,)
+        )).fetchone()
+    if not row or row[0] != c.from_user.id:
+        await c.answer("Este pedido não pertence à sua conta.", show_alert=True)
+        return
+    if row[2] == "delivered":
+        await c.answer("Este pedido já foi entregue.", show_alert=True)
+        return
+    if row[2] == "delivering":
+        await c.answer("A entrega já está em andamento. Aguarde.", show_alert=True)
+        return
+
+    try:
+        payment = sdk.payment().get(pid).get("response", {})
+    except Exception as e:
+        print(f"Erro ao consultar pagamento {pid}: {e}")
+        await c.answer("Não consegui consultar o Pix. Tente novamente.", show_alert=True)
+        return
+    if payment.get("status") != "approved":
+        await c.answer("O Pix ainda não foi confirmado. Aguarde e tente novamente.", show_alert=True)
+        return
+
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        order = await (await db.execute(
+            "SELECT uid, jid, st FROM pedidos WHERE pid = ?", (pid,)
+        )).fetchone()
+        if not order or order[0] != c.from_user.id:
+            await db.rollback()
+            await c.answer("Pedido não encontrado para sua conta.", show_alert=True)
+            return
+        if order[2] == "delivered":
+            await db.rollback()
+            await c.answer("Este pedido já foi entregue.", show_alert=True)
+            return
+        if order[2] != "pending":
+            await db.rollback()
+            await c.answer("A entrega já está em andamento. Aguarde.", show_alert=True)
+            return
+        item = await (await db.execute(
+            "SELECT nome, link FROM jogos WHERE id = ?", (order[1],)
+        )).fetchone()
+        if not item or not item[1] or not item[1].strip():
+            await db.rollback()
+            await c.answer("O link do item não está disponível. Fale com o suporte.", show_alert=True)
+            return
+        nome, link = item
+        await db.execute("UPDATE pedidos SET st = 'delivering' WHERE pid = ? AND st = 'pending'", (pid,))
+        await db.commit()
+
+    await c.answer("Pagamento confirmado. Preparando a entrega...")
+    try:
+        ok = await entregar_conteudo(c.from_user.id, link, nome)
+    except Exception as e:
+        print(f"Falha na entrega do pedido {pid}: {e}")
+        ok = False
+    async with aiosqlite.connect(DB) as db:
+        await db.execute(
+            "UPDATE pedidos SET st = ? WHERE pid = ? AND st = 'delivering'",
+            ("delivered" if ok else "pending", pid)
+        )
+        await db.commit()
+    if ok:
+        await c.message.answer(f"🎉 **Pagamento confirmado!**\\n\\nA entrega de **{nome}** foi concluída ou o link foi enviado.")
     else:
-        await c.message.answer("⏳ O pagamento Pix ainda não foi confirmado. Aguarde alguns instantes e tente verificar novamente.")
+        await c.message.answer("⚠️ O pagamento foi confirmado, mas a entrega não foi concluída. Tente verificar novamente ou fale com o suporte.")
 
 @dp.callback_query(F.data == "voltar_ini")
 async def cb_vi(c):
