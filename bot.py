@@ -37,7 +37,8 @@ CATS = {
     "plataforma": "🧱 Plataforma",
     "terror": "🧟 Terror",
     "rpg": "🧙 RPG",
-    "kinect": "🕺 Kinect"
+    "kinect": "🕺 Kinect",
+    "adaptados": "🧪 Jogos adaptados"
 }
 
 EMULADORES = {
