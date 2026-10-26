@@ -450,7 +450,7 @@ async def cb_getfree(c):
     if entregue:
         nav = IKM(inline_keyboard=[
             [btn("🔵 Catálogo de Jogos", cb="menu_cat", s="primary")],
-            [btn("🟢 Início do Bot", cb="voltar_ini", s="success")]
+            [btn("🟢 Voltar ao Início", cb="voltar_ini", s="success")]
         ])
         await c.message.answer(
             "✅ Conteúdo enviado! O que deseja fazer agora?",
@@ -536,7 +536,7 @@ async def cb_ck(c):
             await db.commit()
         nav = IKM(inline_keyboard=[
             [btn("🔵 Catálogo de Jogos", cb="menu_cat", s="primary")],
-            [btn("🟢 Início do Bot", cb="voltar_ini", s="success")]
+            [btn("🟢 Voltar ao Início", cb="voltar_ini", s="success")]
         ])
         await c.message.answer(
             "✅ Entrega concluída. Guarde esta conversa para consultar o produto.\n\nO que deseja fazer agora?",
