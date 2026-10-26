@@ -287,10 +287,61 @@ async def cmd_estatisticas(m):
 async def cmd_iniciar_cadastro(m, state: FSMContext):
     if m.from_user.id != ADMIN_ID:
         return
+    # Cadastro rapido em uma unica mensagem:
+    # /cadastrar Nome | categoria | preco | link | descricao
+    payload = m.text.partition(" ")[2].strip() if m.text else ""
+    if payload:
+        partes = [p.strip() for p in payload.split("|", 4)]
+        if len(partes) < 4:
+            return await m.answer(
+                "⚡ **Cadastro rapido**\n\n"
+                "Envie tudo em uma mensagem neste formato:\n"
+                "`/cadastrar Nome do jogo | modificados | 4,99 | https://t.me/c/4434900523/11 | Descricao curta`\n\n"
+                "Categorias: " + ", ".join(CATS.keys()) + ", gratis, dashboards\n"
+                "Para cadastrar por etapas, envie apenas /cadastrar.",
+                parse_mode="Markdown"
+            )
+        nome, cat_raw, preco_raw, link = partes[:4]
+        desc = partes[4] if len(partes) > 4 and partes[4] else nome
+        cat_raw = cat_raw.strip().lower()
+        cat = cat_raw if cat_raw in CATS or cat_raw in ("gratis", "dashboards") else None
+        if not cat:
+            cat = next((key for key, label in CATS.items() if label.lower() == cat_raw), None)
+        if not cat:
+            return await m.answer("⚠️ Categoria inválida. Use uma destas chaves: " + ", ".join(CATS.keys()) + ", gratis, dashboards.")
+        try:
+            preco = float(preco_raw.replace(",", "."))
+            if preco < 0:
+                raise ValueError()
+        except ValueError:
+            return await m.answer("⚠️ Preço inválido. Exemplo: 4,99")
+        if not nome or not (link.startswith("https://") or link.startswith("http://") or link.startswith("tg://")):
+            return await m.answer("⚠️ Confira o nome e o link. O link deve começar com https://, http:// ou tg://.")
+        jid = slugify(nome)
+        async with aiosqlite.connect(DB) as db:
+            await db.execute(
+                "INSERT INTO jogos VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
+                (jid, nome, cat, preco, link, desc)
+            )
+            await db.commit()
+        await m.answer(
+            "✅ **Cadastro concluído!**\n\n"
+            "🎮 " + nome + "\n"
+            "📂 " + str(CATS.get(cat, cat)) + "\n"
+            "💰 R$ " + f"{preco:.2f}" + "\n"
+            "🔗 Link salvo.",
+            parse_mode="Markdown"
+        )
+        return
     await state.clear()
     await state.set_state(FormCadastro.nome)
     cancel_kb = IKM(inline_keyboard=[[btn("❌ Cancelar", cb="cancelar_fsm")]])
-    await m.answer("📝 **Cadastro (1/5):** Qual o nome do jogo?", reply_markup=cancel_kb, parse_mode="Markdown")
+    await m.answer(
+        "📝 **Cadastro por etapas:** Qual o nome do jogo?\n\n"
+        "💡 Para cadastrar tudo de uma vez, use:\n"
+        "`/cadastrar Nome | modificados | 4,99 | link do Telegram | descricao`",
+        reply_markup=cancel_kb, parse_mode="Markdown"
+    )
 
 @dp.callback_query(F.data == "cancelar_fsm")
 async def cb_cancela_fsm(c, state: FSMContext):
