@@ -55,13 +55,18 @@ def btn(t, cb=None, u=None, s=None):
         k["callback_data"] = cb
     if u:
         k["url"] = u
-    if s:
+    if s in {"primary", "success", "danger"}:
         k["style"] = s
     try:
         return IKB(**k)
-    except Exception:
-        k.pop("style", None)
-        return IKB(**k)
+    except Exception as e:
+        # Keep the shop available if the installed Telegram schema does not
+        # support button styling, but make the fallback visible in Render logs.
+        if "style" in k:
+            print("AVISO: estilo de botao Telegram nao suportado pelo aiogram/schema:", repr(e))
+            k.pop("style", None)
+            return IKB(**k)
+        raise
 
 def slugify(text):
     cleaned = re.sub(r'[^a-zA-Z0-9]+', '_', str(text).strip().lower()).strip('_')
