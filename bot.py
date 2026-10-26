@@ -94,7 +94,7 @@ async def sync_catalog_to_github():
             {"version": 1, "items": items},
             ensure_ascii=False,
             indent=2,
-        ) + "\\n"
+        ) + "\n"
         sha, _ = await read_github_catalog()
         payload = {
             "message": "Atualizar catálogo da X360 TECH BR",
@@ -585,7 +585,7 @@ async def processa_encaminhado(m):
         )
         await db.commit()
     salvo = await persistir_catalogo()
-    aviso = "\\n☁️ Salvo no GitHub." if salvo else "\\n⚠️ Ainda não salvo no GitHub; não cadastre em lote."
+    aviso = "\n☁️ Salvo no GitHub." if salvo else "\n⚠️ Ainda não salvo no GitHub; não cadastre em lote."
     await m.answer(f"⚡ **Cadastrado:** {nome} (R$ {val:.2f})" + aviso, reply_markup=kb_inicio(), parse_mode="Markdown")
 
 @dp.message(Command("novojogo"))
