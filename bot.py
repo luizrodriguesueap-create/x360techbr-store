@@ -106,6 +106,11 @@ async def init_db():
     async with aiosqlite.connect(DB) as db:
         await db.execute("CREATE TABLE IF NOT EXISTS jogos (id TEXT PRIMARY KEY, nome TEXT, cat TEXT, preco REAL, link TEXT, desc TEXT)")
         await db.execute("CREATE TABLE IF NOT EXISTS pedidos (pid INT PRIMARY KEY, uid INT, jid TEXT, st TEXT)")
+        # Backward-compatible migration for one-time admin sale notifications.
+        cols = await db.execute("PRAGMA table_info(pedidos)")
+        col_names = {row[1] for row in await cols.fetchall()}
+        if "admin_notified" not in col_names:
+            await db.execute("ALTER TABLE pedidos ADD COLUMN admin_notified INTEGER NOT NULL DEFAULT 0")
         itens = [
             ('abadavatar', 'Desbloqueio AbadAvatar', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Guia e ficheiros para desbloqueio AbadAvatar.'),
             ('rockband', 'Desbloqueio Rock Band', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Ficheiros essenciais para desbloqueio Rock Band.'),
@@ -124,6 +129,55 @@ async def init_db():
             "AND link = 'https://t.me/c/4434900523/2'"
         )
         await db.commit()
+
+async def notify_admin_sale(pid, payment=None):
+    """Notify the shop owner once, only after Mercado Pago confirms approval."""
+    if not sdk:
+        return False
+    if payment is None:
+        try:
+            payment = sdk.payment().get(int(pid)).get("response", {})
+        except Exception as e:
+            print("Erro ao verificar pagamento para notificacao:", e)
+            return False
+    if str(payment.get("status", "")).lower() != "approved":
+        return False
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute(
+            "SELECT p.uid, p.jid, p.st, p.admin_notified, j.nome, j.preco "
+            "FROM pedidos p LEFT JOIN jogos j ON j.id = p.jid WHERE p.pid = ?",
+            (int(pid),)
+        )
+        order = await cur.fetchone()
+        if not order or int(order[3] or 0) == 1:
+            return False
+        uid, jid, order_status, _already_notified, game_name, price = order
+        cur = await db.execute(
+            "UPDATE pedidos SET admin_notified = 1 WHERE pid = ? AND COALESCE(admin_notified, 0) = 0",
+            (int(pid),)
+        )
+        await db.commit()
+        if cur.rowcount != 1:
+            return False
+    message = (
+        "🛒 VENDA CONFIRMADA — X360 TECH BR\n\n"
+        f"🎮 Jogo: {game_name or jid}\n"
+        f"💰 Valor: R$ {float(price or payment.get('transaction_amount') or 0):.2f}\n"
+        f"💳 Pagamento: Pix aprovado pelo Mercado Pago\n"
+        f"🧾 Pedido: {int(pid)}\n"
+        f"👤 Telegram do cliente: {int(uid)}\n"
+        f"📦 Entrega: {'concluída' if order_status == 'delivered' else 'aguardando/conferindo'}"
+    )
+    try:
+        await bot.send_message(ADMIN_ID, message)
+        print("Notificacao de venda enviada ao administrador para pedido", pid)
+        return True
+    except Exception as e:
+        print("Falha ao enviar notificacao de venda:", e)
+        async with aiosqlite.connect(DB) as db:
+            await db.execute("UPDATE pedidos SET admin_notified = 0 WHERE pid = ?", (int(pid),))
+            await db.commit()
+        return False
 
 def kb_inicio():
     return IKM(inline_keyboard=[
@@ -486,7 +540,7 @@ async def cb_px(c):
     except Exception as e:
         return await c.message.edit_text("❌ Erro Pix: " + str(e))
     async with aiosqlite.connect(DB) as db:
-        await db.execute("INSERT INTO pedidos VALUES (?, ?, ?, 'pending')", (pid, c.from_user.id, jid))
+        await db.execute("INSERT INTO pedidos (pid, uid, jid, st) VALUES (?, ?, ?, 'pending')", (pid, c.from_user.id, jid))
         await db.commit()
     qr = "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" + urllib.parse.quote(px)
     kb = IKM(inline_keyboard=[[btn("🟢 Ja Paguei (Liberar Download)", cb="chk_" + str(pid), s="success")], [btn("◀️ Cancelar", cb="voltar_ini")]])
@@ -510,6 +564,7 @@ async def cb_ck(c):
         return await c.answer("Erro ao consultar Mercado Pago. Tente novamente.", show_alert=True)
     if status_pagamento != "approved":
         return await c.answer("⏳ Aguardando compensacao Pix...", show_alert=True)
+    await notify_admin_sale(pid, resp)
     async with aiosqlite.connect(DB) as db:
         res = await db.execute("SELECT uid, jid, st FROM pedidos WHERE pid = ?", (pid,))
         ped = await res.fetchone()
@@ -570,10 +625,38 @@ async def cb_np(c):
 async def ping(request):
     return web.Response(text="Online!")
 
+async def mercadopago_webhook(request):
+    """Receive Mercado Pago events; always verify payment status via the API."""
+    if not sdk:
+        return web.Response(text="Mercado Pago not configured", status=503)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    payment_id = request.query.get("data.id") or request.query.get("id")
+    if not payment_id and isinstance(payload, dict):
+        data = payload.get("data") or {}
+        if isinstance(data, dict):
+            payment_id = data.get("id")
+        payment_id = payment_id or payload.get("id")
+    topic = request.query.get("type") or request.query.get("topic")
+    if not payment_id:
+        return web.Response(text="Event received; no payment id", status=200)
+    try:
+        payment = sdk.payment().get(int(payment_id)).get("response", {})
+        if str(payment.get("status", "")).lower() == "approved":
+            await notify_admin_sale(int(payment_id), payment)
+        print("Webhook Mercado Pago recebido:", topic or payload.get("type", "unknown"), "payment", payment_id, "status", payment.get("status", "unknown"))
+        return web.Response(text="OK", status=200)
+    except Exception as e:
+        print("Erro ao processar webhook Mercado Pago:", repr(e))
+        return web.Response(text="Temporary processing error", status=500)
+
 def make_web_app():
     app = web.Application()
     app.router.add_get("/", ping)
     app.router.add_get("/healthz", ping)
+    app.router.add_post("/mercadopago/webhook", mercadopago_webhook)
     return app
 
 async def main():
