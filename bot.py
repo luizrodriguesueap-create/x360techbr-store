@@ -39,7 +39,9 @@ CATS = {
     "plataforma": "🧱 Plataforma",
     "terror": "🧟 Terror",
     "rpg": "🧙 RPG",
-    "kinect": "🕺 Kinect"
+    "kinect": "🕺 Kinect",
+    "modificados": "🛠️ Jogos Modificados para Xbox 360",
+    "servidores_furtivos": "🛰️ Servidores Furtivos"
 }
 
 class FormCadastro(StatesGroup):
@@ -55,7 +57,11 @@ def btn(t, cb=None, u=None, s=None):
         k["callback_data"] = cb
     if u:
         k["url"] = u
-    if s in {"primary", "success", "danger"}:
+    # Give every inline button a green/blue style by default.
+    # Explicit style arguments still take precedence.
+    if s is None:
+        s = "success" if "🟢" in t else "primary"
+    if s in {"primary", "success"}:
         k["style"] = s
     try:
         return IKB(**k)
@@ -110,6 +116,11 @@ async def init_db():
         ]
         # Seeds are added only when missing; never overwrite or delete catalog entries on startup.
         await db.executemany("INSERT OR IGNORE INTO jogos VALUES (?,?,?,?,?,?)", itens)
+        # Aurora and Nexus were accidentally seeded with the same destination.
+        # Disable only the known-wrong Aurora URL until its real post link is supplied.
+        await db.execute(
+            "UPDATE jogos SET link = '' WHERE id = 'dash_aurora' AND link = 'https://t.me/c/4434900523/2'"
+        )
         await db.commit()
 
 def kb_inicio():
@@ -117,6 +128,8 @@ def kb_inicio():
         [btn("🟢 Desbloqueios (Gratis)", cb="menu_desb", s="success")],
         [btn("🟢 Dashboards (Aurora & Nexus)", cb="menu_dash", s="success")],
         [btn("🔵 Catalogo de Jogos (GOD / XEX)", cb="menu_cat", s="primary")],
+        [btn("🛠️ Jogos Modificados para Xbox 360", cb="c_modificados_1", s="primary")],
+        [btn("🛰️ Servidores Furtivos", cb="c_servidores_furtivos_1", s="success")],
         [btn("🔍 Pesquisar Jogo", cb="ajuda_b"), btn("📖 Como Instalar", cb="tut_inst")]
     ])
 
@@ -424,6 +437,10 @@ async def cb_getfree(c):
     if not row:
         return
     n, link = row
+    if not link:
+        return await c.message.answer(
+            "⚠️ O link deste conteúdo ainda está sendo corrigido. Nenhum arquivo foi enviado. Tente novamente mais tarde."
+        )
     await c.message.answer("📦 A preparar a entrega de: **" + str(n) + "**...")
     await entregar_conteudo(c.from_user.id, link, n)
 
