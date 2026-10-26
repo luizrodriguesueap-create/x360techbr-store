@@ -1,4 +1,5 @@
-import os, asyncio, urllib.parse, aiosqlite, mercadopago, re, time
+import os, asyncio, urllib.parse, aiosqlite, mercadopago, re, time, json, base64
+import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
@@ -17,6 +18,106 @@ dp = Dispatcher()
 DB = "x360_store.db"
 BANNER_PATH = "x360_banner.png"
 START_TIME = time.monotonic()
+
+# O catálogo permanente fica em um repositório privado separado do código do bot.
+GITHUB_CATALOG_TOKEN = os.getenv("GITHUB_CATALOG_TOKEN", "").strip()
+GITHUB_CATALOG_REPO = os.getenv(
+    "GITHUB_CATALOG_REPO", "luizrodriguesueap-create/x360techbr-catalog"
+).strip()
+GITHUB_CATALOG_URL = f"https://api.github.com/repos/{GITHUB_CATALOG_REPO}/contents/catalog.json"
+CATALOG_LOCK = asyncio.Lock()
+
+
+async def github_catalog_request(method, payload=None):
+    """Chamada autenticada à API do GitHub; nunca registra tokens nos logs."""
+    if not GITHUB_CATALOG_TOKEN:
+        raise RuntimeError("GITHUB_CATALOG_TOKEN não configurado")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {GITHUB_CATALOG_TOKEN}",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "X360-TECH-BR-Catalog",
+    }
+    timeout = aiohttp.ClientTimeout(total=25)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.request(
+            method, GITHUB_CATALOG_URL, headers=headers, json=payload
+        ) as response:
+            try:
+                data = await response.json(content_type=None)
+            except Exception:
+                data = {}
+            return response.status, data
+
+
+async def read_github_catalog():
+    """Lê o catálogo durável. Retorna (SHA do arquivo, dados do catálogo)."""
+    status, data = await github_catalog_request("GET")
+    if status == 404:
+        return None, {"version": 1, "items": []}
+    if status != 200:
+        raise RuntimeError(f"GitHub GET falhou com HTTP {status}")
+    try:
+        raw = base64.b64decode(
+            "".join((data.get("content") or "").split())
+        ).decode("utf-8")
+        catalog = json.loads(raw)
+    except Exception as exc:
+        raise RuntimeError("catalog.json está inválido ou ilegível") from exc
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("items"), list):
+        raise RuntimeError("Formato inválido em catalog.json")
+    return data.get("sha"), catalog
+
+
+async def sync_catalog_to_github():
+    """Salva o catálogo atual no repositório privado, sem implantar o bot novamente."""
+    if not GITHUB_CATALOG_TOKEN:
+        return False
+    async with CATALOG_LOCK:
+        async with aiosqlite.connect(DB) as db:
+            cur = await db.execute(
+                "SELECT id, nome, cat, preco, link, desc FROM jogos ORDER BY id"
+            )
+            rows = await cur.fetchall()
+        items = [
+            {
+                "id": str(row[0]),
+                "nome": str(row[1] or ""),
+                "cat": str(row[2] or ""),
+                "preco": float(row[3] or 0),
+                "link": str(row[4] or ""),
+                "desc": str(row[5] or ""),
+            }
+            for row in rows
+        ]
+        catalog_json = json.dumps(
+            {"version": 1, "items": items},
+            ensure_ascii=False,
+            indent=2,
+        ) + "\\n"
+        sha, _ = await read_github_catalog()
+        payload = {
+            "message": "Atualizar catálogo da X360 TECH BR",
+            "content": base64.b64encode(catalog_json.encode("utf-8")).decode("ascii"),
+        }
+        if sha:
+            payload["sha"] = sha
+        status, result = await github_catalog_request("PUT", payload)
+        if status not in (200, 201):
+            # Uma alteração concorrente pode trocar o SHA; não fingimos que salvou.
+            raise RuntimeError(f"GitHub PUT falhou com HTTP {status}")
+        return True
+
+
+async def persistir_catalogo():
+    """Sincroniza e informa falhas sem expor detalhes sensíveis."""
+    if not GITHUB_CATALOG_TOKEN:
+        return False
+    try:
+        return await sync_catalog_to_github()
+    except Exception as exc:
+        print(f"Falha ao sincronizar catálogo com GitHub: {type(exc).__name__}")
+        return False
 
 TXT_INI = (
     "🎮 **X360 TECH BR — Loja Xbox 360**\n\n"
@@ -114,15 +215,59 @@ async def init_db():
     async with aiosqlite.connect(DB) as db:
         await db.execute("CREATE TABLE IF NOT EXISTS jogos (id TEXT PRIMARY KEY, nome TEXT, cat TEXT, preco REAL, link TEXT, desc TEXT)")
         await db.execute("CREATE TABLE IF NOT EXISTS pedidos (pid INT PRIMARY KEY, uid INT, jid TEXT, st TEXT)")
-        # Não apagar registros do catálogo durante a inicialização.
-        itens = [
-            ('abadavatar', 'Desbloqueio AbadAvatar', 'gratis', 0.0, '', 'Guia e ficheiros para desbloqueio AbadAvatar.'),
-            ('rockband', 'Desbloqueio Rock Band', 'gratis', 0.0, '', 'Ficheiros essenciais para desbloqueio Rock Band.'),
-            ('dash_aurora', 'Aurora', 'dashboards', 0.0, '', 'Interface moderna com capas automaticas.'),
-            ('dash_nexus', 'Nexus', 'dashboards', 0.0, '', 'Dashboard com menus rapidos e plugins.')
-        ]
-        await db.executemany("INSERT OR IGNORE INTO jogos VALUES (?,?,?,?,?,?)", itens)
         await db.commit()
+
+    if GITHUB_CATALOG_TOKEN:
+        # Quando o armazenamento permanente está habilitado, o GitHub é a fonte oficial.
+        # Se a leitura falhar, o bot não deve continuar silenciosamente com um catálogo vazio.
+        try:
+            sha, catalog = await read_github_catalog()
+            if sha is None:
+                if not await sync_catalog_to_github():
+                    raise RuntimeError("Não foi possível inicializar catalog.json")
+                sha, catalog = await read_github_catalog()
+            valid_items = []
+            for item in catalog.get("items", []):
+                if not isinstance(item, dict):
+                    continue
+                jid = str(item.get("id") or "").strip()
+                nome = str(item.get("nome") or "").strip()
+                if not jid or not nome:
+                    continue
+                try:
+                    preco = float(item.get("preco") or 0)
+                except (TypeError, ValueError):
+                    preco = 0.0
+                valid_items.append((
+                    jid, nome, str(item.get("cat") or "acao"),
+                    preco, str(item.get("link") or ""),
+                    str(item.get("desc") or "")
+                ))
+            async with aiosqlite.connect(DB) as db:
+                await db.execute("DELETE FROM jogos")
+                if valid_items:
+                    await db.executemany(
+                        "INSERT INTO jogos VALUES (?,?,?,?,?,?)", valid_items
+                    )
+                await db.commit()
+            print(f"Catálogo carregado do GitHub: {len(valid_items)} itens.")
+        except Exception as exc:
+            print(f"Falha ao carregar catálogo permanente: {type(exc).__name__}")
+            raise RuntimeError(
+                "Catálogo GitHub indisponível; inicialização interrompida para evitar perda de dados."
+            ) from exc
+    else:
+        # Compatibilidade temporária até configurar o token de escrita no Render.
+        async with aiosqlite.connect(DB) as db:
+            itens = [
+                ('abadavatar', 'Desbloqueio AbadAvatar', 'gratis', 0.0, '', 'Guia e ficheiros para desbloqueio AbadAvatar.'),
+                ('rockband', 'Desbloqueio Rock Band', 'gratis', 0.0, '', 'Ficheiros essenciais para desbloqueio Rock Band.'),
+                ('dash_aurora', 'Aurora', 'dashboards', 0.0, '', 'Interface moderna com capas automaticas.'),
+                ('dash_nexus', 'Nexus', 'dashboards', 0.0, '', 'Dashboard com menus rapidos e plugins.')
+            ]
+            await db.executemany("INSERT OR IGNORE INTO jogos VALUES (?,?,?,?,?,?)", itens)
+            await db.commit()
+        print("ATENÇÃO: catálogo ainda usa SQLite temporário; configure GITHUB_CATALOG_TOKEN.")
 
 def kb_inicio():
     # Poucas opções, agrupadas por função; tutorial permanece disponível.
@@ -315,6 +460,7 @@ async def cmd_saude(m):
         pendentes = estados.get("pending", 0)
         em_entrega = estados.get("delivering", 0)
         pix = "configurado" if MP_KEY else "não configurado"
+        persistencia = "GitHub configurado" if GITHUB_CATALOG_TOKEN else "PENDENTE (SQLite temporário)"
 
         texto = (
             "🩺 **Saúde da X360 TECH BR**\n"
@@ -327,6 +473,7 @@ async def cmd_saude(m):
             f"🧾 Pedidos aguardando pagamento: {pendentes}\n"
             f"📦 Pedidos em entrega: {em_entrega}\n"
             f"💳 Mercado Pago: {pix}\n"
+            f"🗃️ Persistência: {persistencia}\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
         await m.answer(texto, parse_mode="Markdown")
@@ -401,7 +548,12 @@ async def processa_desc(m, state: FSMContext):
             (data['jid'], data['nome'], data['cat'], data['preco'], data['link'], desc)
         )
         await db.commit()
+    salvo = await persistir_catalogo()
     res = f"✅ **Jogo Cadastrado!**\n\n🎮 {data['nome']}\n📂 {CATS.get(data['cat'], EMULADORES.get(data['cat'], data['cat']))}\n💰 R$ {data['preco']:.2f}"
+    if salvo:
+        res += "\n\n☁️ Catálogo salvo no GitHub."
+    else:
+        res += "\n\n⚠️ **Catálogo ainda NÃO protegido contra reinicializações.** Não cadastre em lote até configurar a persistência."
     await m.answer(res, reply_markup=kb_inicio(), parse_mode="Markdown")
 
 @dp.message(F.forward_origin)
@@ -432,7 +584,9 @@ async def processa_encaminhado(m):
             (jid, nome, cat, val, link, desc)
         )
         await db.commit()
-    await m.answer(f"⚡ **Cadastrado:** {nome} (R$ {val:.2f})", reply_markup=kb_inicio(), parse_mode="Markdown")
+    salvo = await persistir_catalogo()
+    aviso = "\\n☁️ Salvo no GitHub." if salvo else "\\n⚠️ Ainda não salvo no GitHub; não cadastre em lote."
+    await m.answer(f"⚡ **Cadastrado:** {nome} (R$ {val:.2f})" + aviso, reply_markup=kb_inicio(), parse_mode="Markdown")
 
 @dp.message(Command("novojogo"))
 async def cmd_novo(m):
@@ -451,7 +605,9 @@ async def cmd_novo(m):
             (p[0].lower(), p[1], p[2].lower(), val, p[4], p[5])
         )
         await db.commit()
-    await m.answer(f"✅ Cadastrado: **{p[1]}**", parse_mode="Markdown")
+    salvo = await persistir_catalogo()
+    aviso = "\\n☁️ Salvo no GitHub." if salvo else "\\n⚠️ Ainda não salvo no GitHub; não cadastre em lote."
+    await m.answer(f"✅ Cadastrado: **{p[1]}**" + aviso, parse_mode="Markdown")
 
 @dp.message(CommandStart())
 async def cmd_st(m):
