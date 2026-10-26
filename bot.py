@@ -243,6 +243,44 @@ async def cmd_estatisticas(m):
     t += "━━━━━━━━━━━━━━━━━━━━━"
     await m.answer(t, parse_mode="Markdown")
 
+@dp.message(Command("catalogo_admin"))
+async def cmd_catalogo_admin(m):
+    """Diagnóstico somente de leitura do catálogo e do arquivo SQLite ativo."""
+    if not m.from_user or m.from_user.id != ADMIN_ID:
+        return
+    try:
+        async with aiosqlite.connect(DB) as db:
+            cur = await db.execute(
+                "SELECT id, nome, cat, preco, link FROM jogos ORDER BY nome COLLATE NOCASE"
+            )
+            rows = await cur.fetchall()
+
+        categorias_validas = set(CATS) | set(EMULADORES) | {"gratis", "dashboards"}
+        sem_link = sum(1 for row in rows if not (row[4] or "").strip())
+        cats_invalidas = sum(1 for row in rows if row[2] not in categorias_validas)
+        linhas = [
+            "🔎 DIAGNÓSTICO DO CATÁLOGO",
+            f"Itens encontrados: {len(rows)}",
+            f"Sem link cadastrado: {sem_link}",
+            f"Categoria não reconhecida: {cats_invalidas}",
+            f"Banco em uso: {os.path.abspath(DB)}",
+            "",
+            "ITENS (link indicado apenas como SIM/NÃO):"
+        ]
+        for jid, nome, cat, preco, link in rows[:35]:
+            tem_link = "SIM" if (link or "").strip() else "NÃO"
+            linhas.append(
+                f"• {nome} | id={jid} | cat={cat} | R$ {float(preco or 0):.2f} | link={tem_link}"
+            )
+        if len(rows) > 35:
+            linhas.append(f"... e mais {len(rows) - 35} itens.")
+        if not rows:
+            linhas.append("O banco consultado não contém itens.")
+        await m.answer("\n".join(linhas))
+    except Exception as e:
+        print(f"Erro no comando administrativo /catalogo_admin: {e}")
+        await m.answer("⚠️ Não consegui consultar o catálogo. Verifique os registros do serviço.")
+
 @dp.message(Command("saude"))
 @dp.message(Command("status"))
 async def cmd_saude(m):
