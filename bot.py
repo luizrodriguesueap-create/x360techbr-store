@@ -116,10 +116,12 @@ async def init_db():
         ]
         # Seeds are added only when missing; never overwrite or delete catalog entries on startup.
         await db.executemany("INSERT OR IGNORE INTO jogos VALUES (?,?,?,?,?,?)", itens)
-        # Aurora and Nexus were accidentally seeded with the same destination.
-        # Disable only the known-wrong Aurora URL until its real post link is supplied.
+        # Several items were accidentally seeded with the Nexus post URL.
+        # Keep that URL for Nexus only; disable it for Aurora and unrelated unlocks
+        # until their correct Telegram post links are supplied.
         await db.execute(
-            "UPDATE jogos SET link = '' WHERE id = 'dash_aurora' AND link = 'https://t.me/c/4434900523/2'"
+            "UPDATE jogos SET link = '' WHERE id IN ('dash_aurora', 'abadavatar', 'rockband') "
+            "AND link = 'https://t.me/c/4434900523/2'"
         )
         await db.commit()
 
