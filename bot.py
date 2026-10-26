@@ -442,7 +442,22 @@ async def cb_getfree(c):
             "⚠️ O link deste conteúdo ainda está sendo corrigido. Nenhum arquivo foi enviado. Tente novamente mais tarde."
         )
     await c.message.answer("📦 A preparar a entrega de: **" + str(n) + "**...")
-    await entregar_conteudo(c.from_user.id, link, n)
+    try:
+        entregue = await entregar_conteudo(c.from_user.id, link, n)
+    except Exception as e:
+        print("Falha na entrega gratuita:", e)
+        entregue = False
+    if entregue:
+        nav = IKM(inline_keyboard=[
+            [btn("🔵 Catálogo de Jogos", cb="menu_cat", s="primary")],
+            [btn("🟢 Início do Bot", cb="voltar_ini", s="success")]
+        ])
+        await c.message.answer(
+            "✅ Conteúdo enviado! O que deseja fazer agora?",
+            reply_markup=nav
+        )
+    else:
+        await c.message.answer("⚠️ Não consegui concluir o envio. Tente novamente mais tarde.")
 
 @dp.callback_query(F.data.startswith("pix_"))
 async def cb_px(c):
@@ -519,7 +534,14 @@ async def cb_ck(c):
         async with aiosqlite.connect(DB) as db:
             await db.execute("UPDATE pedidos SET st = 'delivered' WHERE pid = ? AND uid = ?", (pid, c.from_user.id))
             await db.commit()
-        await c.message.answer("✅ Entrega concluida. Guarde esta conversa para consultar o produto.")
+        nav = IKM(inline_keyboard=[
+            [btn("🔵 Catálogo de Jogos", cb="menu_cat", s="primary")],
+            [btn("🟢 Início do Bot", cb="voltar_ini", s="success")]
+        ])
+        await c.message.answer(
+            "✅ Entrega concluída. Guarde esta conversa para consultar o produto.\n\nO que deseja fazer agora?",
+            reply_markup=nav
+        )
     else:
         await c.message.answer("⚠️ O pagamento foi confirmado, mas o envio automatico falhou. Seu pedido nao foi marcado como entregue. Contate o administrador para concluir a entrega.")
 
