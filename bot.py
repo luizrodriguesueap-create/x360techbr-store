@@ -99,9 +99,9 @@ def normalizar_categoria(valor):
     # Match the visible category label even if the user omits its emoji.
     for key, label in CATS.items():
         clean_label = re.sub(r"[^a-z0-9 ]", " ", label.lower())
-        clean_label = re.sub(r"\\s+", " ", clean_label).strip()
+        clean_label = re.sub(r"\s+", " ", clean_label).strip()
         clean_raw = re.sub(r"[^a-z0-9 ]", " ", raw)
-        clean_raw = re.sub(r"\\s+", " ", clean_raw).strip()
+        clean_raw = re.sub(r"\s+", " ", clean_raw).strip()
         if clean_raw == clean_label or clean_raw in (key.replace("_", " "),):
             return key
     return None
