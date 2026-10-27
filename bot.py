@@ -1,4 +1,6 @@
 import os, asyncio, urllib.parse, aiosqlite, mercadopago, re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
@@ -106,6 +108,36 @@ def normalizar_categoria(valor):
             return key
     return None
 
+def hoje_local():
+    return datetime.now(ZoneInfo("America/Belem")).date().isoformat()
+
+def preco_efetivo(preco, promo_price=None, promo_until=None):
+    if promo_price is not None and promo_until and str(promo_until) >= hoje_local():
+        try:
+            promo, base = float(promo_price), float(preco or 0)
+            if 0 <= promo < base:
+                return promo
+        except (TypeError, ValueError):
+            pass
+    return float(preco or 0)
+
+def texto_preco(preco, promo_price=None, promo_until=None):
+    base = float(preco or 0)
+    atual = preco_efetivo(base, promo_price, promo_until)
+    if atual < base:
+        return f"🔥 PROMOÇÃO: R$ {atual:.2f} (antes R$ {base:.2f}; até {promo_until})"
+    return f"💰 R$ {base:.2f}"
+
+def kb_admin():
+    return IKM(inline_keyboard=[
+        [btn("📝 Cadastrar / editar jogo", cb="adm_help_cadastro", s="primary")],
+        [btn("💰 Alterar preço", cb="adm_help_preco", s="success")],
+        [btn("🏷️ Criar promoção", cb="adm_help_promo", s="success")],
+        [btn("⏹️ Encerrar promoção", cb="adm_help_fimpromo", s="primary")],
+        [btn("📦 Pausar / reativar produto", cb="adm_help_ativo", s="primary")],
+        [btn("◀️ Voltar ao início", cb="voltar_ini", s="primary")]
+    ])
+
 def parse_tg_link(link):
     m = re.search(r't\.me/c/(\d+)/(\d+)', link)
     if m:
@@ -139,6 +171,14 @@ async def init_db():
         col_names = {row[1] for row in await cols.fetchall()}
         if "admin_notified" not in col_names:
             await db.execute("ALTER TABLE pedidos ADD COLUMN admin_notified INTEGER NOT NULL DEFAULT 0")
+        game_cols = await db.execute("PRAGMA table_info(jogos)")
+        game_col_names = {row[1] for row in await game_cols.fetchall()}
+        if "promo_price" not in game_col_names:
+            await db.execute("ALTER TABLE jogos ADD COLUMN promo_price REAL")
+        if "promo_until" not in game_col_names:
+            await db.execute("ALTER TABLE jogos ADD COLUMN promo_until TEXT")
+        if "active" not in game_col_names:
+            await db.execute("ALTER TABLE jogos ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
         itens = [
             ('abadavatar', 'Desbloqueio AbadAvatar', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Guia e ficheiros para desbloqueio AbadAvatar.'),
             ('rockband', 'Desbloqueio Rock Band', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Ficheiros essenciais para desbloqueio Rock Band.'),
@@ -259,16 +299,16 @@ def kb_escolher_categoria():
 async def kb_lista(ck, pg=1):
     off = (pg - 1) * 6
     async with aiosqlite.connect(DB) as db:
-        c1 = await db.execute("SELECT COUNT(*) FROM jogos WHERE cat = ?", (ck,))
+        c1 = await db.execute("SELECT COUNT(*) FROM jogos WHERE cat = ? AND active = 1", (ck,))
         tot = (await c1.fetchone())[0]
-        c2 = await db.execute("SELECT id, nome, preco FROM jogos WHERE cat = ? ORDER BY nome ASC LIMIT 6 OFFSET ?", (ck, off))
+        c2 = await db.execute("SELECT id, nome, preco, promo_price, promo_until FROM jogos WHERE cat = ? AND active = 1 ORDER BY nome ASC LIMIT 6 OFFSET ?", (ck, off))
         rows = await c2.fetchall()
     b = []
     for r in rows:
         jid_item = str(r[0])
         nome_item = str(r[1])
-        preco_item = float(r[2])
-        label_btn = "🔵 " + nome_item + " - R$ " + f"{preco_item:.2f}"
+        preco_item = preco_efetivo(r[2], r[3], r[4])
+        label_btn = ("🔥 " if preco_item < float(r[2] or 0) else "🔵 ") + nome_item + " - R$ " + f"{preco_item:.2f}"
         b.append([btn(label_btn, cb="info_" + jid_item, s="primary")])
     tot_p = max(1, (tot + 5) // 6)
     nav = []
@@ -293,13 +333,144 @@ async def safe_edit(cb, text, markup):
         except Exception:
             pass
 
+@dp.message(Command("admin"))
+async def cmd_admin(m):
+    if m.from_user.id != ADMIN_ID:
+        return
+    await m.answer(
+        "⚙️ **Painel administrativo — X360 TECH BR**\n\n"
+        "Cadastro/edição: /cadastrar Nome | categoria | preço | link | descrição\n"
+        "Alterar preço: /preco ID_DO_JOGO | novo_preço\n"
+        "Criar promoção: /promocao ID_DO_JOGO | preço_promocional | AAAA-MM-DD\n"
+        "Encerrar promoção: /fim_promocao ID_DO_JOGO\n"
+        "Pausar/reativar: /pausar ID_DO_JOGO ou /ativar ID_DO_JOGO\n\n"
+        "Use /produtos para consultar os IDs.",
+        reply_markup=kb_admin(), parse_mode="Markdown"
+    )
+
+@dp.message(Command("produtos"))
+async def cmd_produtos(m):
+    if m.from_user.id != ADMIN_ID:
+        return
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT id, nome, preco, promo_price, promo_until, active FROM jogos ORDER BY nome")
+        rows = await cur.fetchall()
+    if not rows:
+        return await m.answer("Nenhum produto cadastrado.")
+    lines = ["📦 **Produtos cadastrados**"]
+    for jid, nome, preco, promo, until, active in rows[:100]:
+        status = "ATIVO" if active else "PAUSADO"
+        lines.append(f"• {jid} — {nome} — {texto_preco(preco, promo, until)} — {status}")
+    if len(rows) > 100:
+        lines.append(f"... e mais {len(rows)-100} produtos.")
+    await m.answer("\n".join(lines), parse_mode="Markdown")
+
+@dp.message(Command("preco"))
+async def cmd_preco(m):
+    if m.from_user.id != ADMIN_ID:
+        return
+    parts = [x.strip() for x in m.text.partition(" ")[2].split("|", 1)]
+    if len(parts) != 2 or not parts[0]:
+        return await m.answer("Formato: /preco ID_DO_JOGO | 5,99")
+    jid, raw = parts
+    try:
+        price = float(raw.replace(",", "."))
+        if price < 0 or price == float("inf"):
+            raise ValueError()
+    except ValueError:
+        return await m.answer("Preço inválido. Exemplo: /preco limbo | 5,99")
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid.lower(),))
+        row = await cur.fetchone()
+        if not row:
+            return await m.answer("Não encontrei esse ID. Consulte /produtos.")
+        await db.execute("UPDATE jogos SET preco = ?, promo_price = NULL, promo_until = NULL WHERE id = ?", (price, jid.lower()))
+        await db.commit()
+    await m.answer(f"Preço de {row[0]} atualizado para R$ {price:.2f}. Promoção anterior encerrada, se existia.")
+
+@dp.message(Command("promocao"))
+async def cmd_promocao(m):
+    if m.from_user.id != ADMIN_ID:
+        return
+    parts = [x.strip() for x in m.text.partition(" ")[2].split("|", 2)]
+    if len(parts) != 3:
+        return await m.answer("Formato: /promocao ID_DO_JOGO | preço_promocional | AAAA-MM-DD\nExemplo: /promocao limbo | 2,99 | 2026-11-30")
+    jid, raw_price, until = parts
+    try:
+        promo = float(raw_price.replace(",", "."))
+        valid_until = datetime.strptime(until, "%Y-%m-%d").date().isoformat()
+        if valid_until < hoje_local() or promo < 0 or promo == float("inf"):
+            raise ValueError()
+    except ValueError:
+        return await m.answer("Confira o preço e a data. Use AAAA-MM-DD e uma data de hoje em diante.")
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT nome, preco FROM jogos WHERE id = ?", (jid.lower(),))
+        row = await cur.fetchone()
+        if not row:
+            return await m.answer("Não encontrei esse ID. Consulte /produtos.")
+        if promo >= float(row[1] or 0):
+            return await m.answer(f"O preço promocional precisa ser menor que o preço normal (R$ {float(row[1] or 0):.2f}).")
+        await db.execute("UPDATE jogos SET promo_price = ?, promo_until = ? WHERE id = ?", (promo, valid_until, jid.lower()))
+        await db.commit()
+    await m.answer(f"Promoção programada!\n\nJogo: {row[0]}\nDe R$ {float(row[1]):.2f} por R$ {promo:.2f}\nAté: {valid_until}")
+
+@dp.message(Command("fim_promocao"))
+async def cmd_fim_promocao(m):
+    if m.from_user.id != ADMIN_ID:
+        return
+    jid = m.text.partition(" ")[2].strip().lower()
+    if not jid:
+        return await m.answer("Formato: /fim_promocao ID_DO_JOGO")
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
+        row = await cur.fetchone()
+        if not row:
+            return await m.answer("Não encontrei esse ID. Consulte /produtos.")
+        await db.execute("UPDATE jogos SET promo_price = NULL, promo_until = NULL WHERE id = ?", (jid,))
+        await db.commit()
+    await m.answer(f"Promoção encerrada para {row[0]}.")
+
+@dp.message(Command("pausar"))
+@dp.message(Command("ativar"))
+async def cmd_status_produto(m):
+    if m.from_user.id != ADMIN_ID:
+        return
+    parts = m.text.split(maxsplit=1)
+    if len(parts) < 2:
+        return await m.answer("Informe o ID. Consulte /produtos.")
+    active = 0 if parts[0].lower().endswith("pausar") else 1
+    jid = parts[1].strip().lower()
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
+        row = await cur.fetchone()
+        if not row:
+            return await m.answer("Não encontrei esse ID. Consulte /produtos.")
+        await db.execute("UPDATE jogos SET active = ? WHERE id = ?", (active, jid))
+        await db.commit()
+    await m.answer(("Produto pausado: " if not active else "Produto reativado: ") + str(row[0]))
+
+@dp.callback_query(F.data.startswith("adm_help_"))
+async def cb_admin_help(c):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    key = c.data.replace("adm_help_", "")
+    messages = {
+        "cadastro": "Para cadastrar ou editar: /cadastrar Nome | categoria | preço | link | descrição\nSe o ID já existir, os dados serão atualizados.",
+        "preco": "Para alterar preço: /preco ID_DO_JOGO | 5,99\nConsulte /produtos para ver os IDs.",
+        "promo": "Para criar promoção: /promocao ID_DO_JOGO | 2,99 | 2026-11-30",
+        "fimpromo": "Para encerrar antes da data: /fim_promocao ID_DO_JOGO",
+        "ativo": "Para pausar: /pausar ID_DO_JOGO\nPara reativar: /ativar ID_DO_JOGO"
+    }
+    await c.answer()
+    await c.message.answer(messages.get(key, "Use /admin para ver as opções."))
+
 @dp.message(Command("stats"))
 @dp.message(Command("total"))
 async def cmd_estatisticas(m):
     if m.from_user.id != ADMIN_ID:
         return
     async with aiosqlite.connect(DB) as db:
-        res = await db.execute("SELECT cat FROM jogos WHERE preco > 0")
+        res = await db.execute("SELECT cat FROM jogos WHERE preco > 0 AND active = 1")
         linhas = await res.fetchall()
     tot = len(linhas)
     cont = {}
@@ -501,7 +672,7 @@ async def cmd_bs(m):
     if not t:
         return await m.answer("Envie: `/buscar nome-do-jogo`", parse_mode="Markdown")
     async with aiosqlite.connect(DB) as db:
-        c = await db.execute("SELECT id, nome, preco FROM jogos WHERE nome LIKE ? LIMIT 8", ("%" + t + "%",))
+        c = await db.execute("SELECT id, nome, preco, promo_price, promo_until FROM jogos WHERE nome LIKE ? AND active = 1 LIMIT 8", ("%" + t + "%",))
         rows = await c.fetchall()
     if not rows:
         return await m.answer("Nenhum jogo encontrado.")
@@ -509,8 +680,8 @@ async def cmd_bs(m):
     for r in rows:
         jid_item = str(r[0])
         nome_item = str(r[1])
-        preco_item = float(r[2])
-        label_btn = "🔵 " + nome_item + " - R$ " + f"{preco_item:.2f}"
+        preco_item = preco_efetivo(r[2], r[3], r[4])
+        label_btn = ("🔥 " if preco_item < float(r[2] or 0) else "🔵 ") + nome_item + " - R$ " + f"{preco_item:.2f}"
         b.append([btn(label_btn, cb="info_" + jid_item, s="primary")])
     b.append([btn("◀️ Voltar ao Inicio", cb="voltar_ini")])
     await m.answer("Resultados para: `" + str(t) + "`", reply_markup=IKM(inline_keyboard=b), parse_mode="Markdown")
@@ -549,18 +720,21 @@ async def cb_in(c):
     jid = c.data.replace("info_", "")
     await c.answer()
     async with aiosqlite.connect(DB) as db:
-        res = await db.execute("SELECT nome, preco, desc, cat, link FROM jogos WHERE id = ?", (jid,))
+        res = await db.execute("SELECT nome, preco, desc, cat, link, promo_price, promo_until, active FROM jogos WHERE id = ?", (jid,))
         row = await res.fetchone()
     if not row:
         return
-    n, p, d, ck, link = row
+    n, p, d, ck, link, promo_price, promo_until, active = row
+    if not active:
+        return await c.message.answer("Este produto está temporariamente indisponível.")
+    preco_atual = preco_efetivo(p, promo_price, promo_until)
     v = "menu_desb" if ck == "gratis" else ("menu_dash" if ck == "dashboards" else "c_" + str(ck) + "_1")
     if p == 0.0:
         tx = "🎁 **" + str(n) + "** (Gratis)\n\n📝 " + str(d)
         b = [[btn("🟢 Receber Ficheiro Agora", cb="getfree_" + str(jid), s="success")], [btn("◀️ Voltar", cb=v)]]
     else:
-        tx = "🎮 **" + str(n) + "**\n💰 R$ " + f"{p:.2f}" + " (GOD / XEX)\n\n📝 " + str(d)
-        b = [[btn("🟢 Pagar R$ " + f"{p:.2f}" + " via Pix", cb="pix_" + str(jid), s="success")], [btn("◀️ Voltar", cb=v)]]
+        tx = "🎮 **" + str(n) + "**\n" + texto_preco(p, promo_price, promo_until) + " (GOD / XEX)\n\n📝 " + str(d)
+        b = [[btn("🟢 Pagar R$ " + f"{preco_atual:.2f}" + " via Pix", cb="pix_" + str(jid), s="success")], [btn("◀️ Voltar", cb=v)]]
     await safe_edit(c, tx, IKM(inline_keyboard=b))
 
 @dp.callback_query(F.data.startswith("getfree_"))
@@ -568,11 +742,13 @@ async def cb_getfree(c):
     jid = c.data.replace("getfree_", "")
     await c.answer("A enviar ficheiro...")
     async with aiosqlite.connect(DB) as db:
-        res = await db.execute("SELECT nome, link FROM jogos WHERE id = ?", (jid,))
+        res = await db.execute("SELECT nome, link, active FROM jogos WHERE id = ?", (jid,))
         row = await res.fetchone()
     if not row:
         return
-    n, link = row
+    n, link, active = row
+    if not active:
+        return await c.message.answer("Este produto está temporariamente indisponível.")
     if not link:
         return await c.message.answer(
             "⚠️ O link deste conteúdo ainda está sendo corrigido. Nenhum arquivo foi enviado. Tente novamente mais tarde."
@@ -602,11 +778,14 @@ async def cb_px(c):
     if not sdk:
         return await c.message.answer("❌ Pagamento indisponivel no momento. Tente novamente mais tarde.")
     async with aiosqlite.connect(DB) as db:
-        res = await db.execute("SELECT nome, preco FROM jogos WHERE id = ?", (jid,))
+        res = await db.execute("SELECT nome, preco, promo_price, promo_until, active FROM jogos WHERE id = ?", (jid,))
         row = await res.fetchone()
     if not row:
         return
-    n, pr = row
+    n, base_price, promo_price, promo_until, active = row
+    if not active:
+        return await c.message.answer("Este produto está temporariamente indisponível.")
+    pr = preco_efetivo(base_price, promo_price, promo_until)
     await c.message.edit_text("⏳ A ligar ao Mercado Pago...")
     pdata = {
         "transaction_amount": float(pr),
@@ -625,7 +804,7 @@ async def cb_px(c):
     qr = "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" + urllib.parse.quote(px)
     kb = IKM(inline_keyboard=[[btn("🟢 Ja Paguei (Liberar Download)", cb="chk_" + str(pid), s="success")], [btn("◀️ Cancelar", cb="voltar_ini")]])
     await c.message.delete()
-    caption_txt = "🎮 **" + str(n) + "**\n💰 R$ " + f"{pr:.2f}" + "\n\n`" + str(px) + "`"
+    caption_txt = "🎮 **" + str(n) + "**\n" + texto_preco(base_price, promo_price, promo_until) + "\n\n`" + str(px) + "`"
     await c.message.answer_photo(photo=qr, caption=caption_txt, reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("chk_"))
