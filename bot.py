@@ -78,6 +78,34 @@ def slugify(text):
     cleaned = re.sub(r'[^a-zA-Z0-9]+', '_', str(text).strip().lower()).strip('_')
     return cleaned[:25] or "jogo"
 
+def normalizar_categoria(valor):
+    """Accept category keys, visible labels, and common names typed by the admin."""
+    raw = str(valor or "").strip().lower()
+    aliases = {
+        "jogos modificados": "modificados",
+        "jogo modificado": "modificados",
+        "modificados xbox 360": "modificados",
+        "jogos modificados para xbox 360": "modificados",
+        "grátis": "gratis",
+        "desbloqueio": "gratis",
+        "desbloqueios": "gratis",
+        "dashboard": "dashboards",
+        "dashboards": "dashboards",
+    }
+    if raw in aliases:
+        return aliases[raw]
+    if raw in CATS or raw in ("gratis", "dashboards"):
+        return raw
+    # Match the visible category label even if the user omits its emoji.
+    for key, label in CATS.items():
+        clean_label = re.sub(r"[^a-z0-9 ]", " ", label.lower())
+        clean_label = re.sub(r"\\s+", " ", clean_label).strip()
+        clean_raw = re.sub(r"[^a-z0-9 ]", " ", raw)
+        clean_raw = re.sub(r"\\s+", " ", clean_raw).strip()
+        if clean_raw == clean_label or clean_raw in (key.replace("_", " "),):
+            return key
+    return None
+
 def parse_tg_link(link):
     m = re.search(r't\.me/c/(\d+)/(\d+)', link)
     if m:
@@ -130,6 +158,8 @@ async def init_db():
         )
         await db.commit()
 
+SALE_NOTIFY_LOCK = asyncio.Lock()
+
 async def notify_admin_sale(pid, payment=None):
     """Notify the shop owner once, only after Mercado Pago confirms approval."""
     if not sdk:
@@ -142,45 +172,44 @@ async def notify_admin_sale(pid, payment=None):
             return False
     if str(payment.get("status", "")).lower() != "approved":
         return False
-    async with aiosqlite.connect(DB) as db:
-        cur = await db.execute(
-            "SELECT p.uid, p.jid, p.st, p.admin_notified, j.nome, j.preco "
-            "FROM pedidos p LEFT JOIN jogos j ON j.id = p.jid WHERE p.pid = ?",
-            (int(pid),)
-        )
-        order = await cur.fetchone()
+
+    # Serialize notifications in this process. Save the sent flag only after
+    # Telegram accepts the message, so a send failure does not suppress retries.
+    async with SALE_NOTIFY_LOCK:
+        async with aiosqlite.connect(DB) as db:
+            cur = await db.execute(
+                "SELECT p.uid, p.jid, p.st, p.admin_notified, j.nome, j.preco "
+                "FROM pedidos p LEFT JOIN jogos j ON j.id = p.jid WHERE p.pid = ?",
+                (int(pid),)
+            )
+            order = await cur.fetchone()
         if not order:
             return False
         if int(order[3] or 0) == 1:
-            # Already sent: treat as success so repeated webhooks are acknowledged.
             return True
+
         uid, jid, order_status, _already_notified, game_name, price = order
-        cur = await db.execute(
-            "UPDATE pedidos SET admin_notified = 1 WHERE pid = ? AND COALESCE(admin_notified, 0) = 0",
-            (int(pid),)
+        amount = price if price is not None else payment.get("transaction_amount", 0)
+        message = (
+            "🛒 VENDA CONFIRMADA — X360 TECH BR\\n\\n"
+            f"🎮 Jogo: {game_name or jid}\\n"
+            f"💰 Valor: R$ {float(amount or 0):.2f}\\n"
+            "💳 Pagamento: Pix aprovado pelo Mercado Pago\\n"
+            f"🧾 Pedido: {int(pid)}\\n"
+            f"👤 Telegram do cliente: {int(uid)}\\n"
+            f"📦 Entrega: {'concluída' if order_status == 'delivered' else 'aguardando/conferindo'}"
         )
-        await db.commit()
-        if cur.rowcount != 1:
+        try:
+            await bot.send_message(ADMIN_ID, message)
+        except Exception as e:
+            print("Falha ao enviar notificacao de venda:", e)
             return False
-    message = (
-        "🛒 VENDA CONFIRMADA — X360 TECH BR\n\n"
-        f"🎮 Jogo: {game_name or jid}\n"
-        f"💰 Valor: R$ {float(price or payment.get('transaction_amount') or 0):.2f}\n"
-        f"💳 Pagamento: Pix aprovado pelo Mercado Pago\n"
-        f"🧾 Pedido: {int(pid)}\n"
-        f"👤 Telegram do cliente: {int(uid)}\n"
-        f"📦 Entrega: {'concluída' if order_status == 'delivered' else 'aguardando/conferindo'}"
-    )
-    try:
-        await bot.send_message(ADMIN_ID, message)
+
+        async with aiosqlite.connect(DB) as db:
+            await db.execute("UPDATE pedidos SET admin_notified = 1 WHERE pid = ?", (int(pid),))
+            await db.commit()
         print("Notificacao de venda enviada ao administrador para pedido", pid)
         return True
-    except Exception as e:
-        print("Falha ao enviar notificacao de venda:", e)
-        async with aiosqlite.connect(DB) as db:
-            await db.execute("UPDATE pedidos SET admin_notified = 0 WHERE pid = ?", (int(pid),))
-            await db.commit()
-        return False
 
 def kb_inicio():
     return IKM(inline_keyboard=[
@@ -306,10 +335,7 @@ async def cmd_iniciar_cadastro(m, state: FSMContext):
             )
         nome, cat_raw, preco_raw, link = partes[:4]
         desc = partes[4] if len(partes) > 4 and partes[4] else nome
-        cat_raw = cat_raw.strip().lower()
-        cat = cat_raw if cat_raw in CATS or cat_raw in ("gratis", "dashboards") else None
-        if not cat:
-            cat = next((key for key, label in CATS.items() if label.lower() == cat_raw), None)
+        cat = normalizar_categoria(cat_raw)
         if not cat:
             return await m.answer("⚠️ Categoria inválida. Use uma destas chaves: " + ", ".join(CATS.keys()) + ", gratis, dashboards.")
         try:
@@ -323,7 +349,7 @@ async def cmd_iniciar_cadastro(m, state: FSMContext):
         jid = slugify(nome)
         async with aiosqlite.connect(DB) as db:
             await db.execute(
-                "INSERT INTO jogos VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
+                "INSERT INTO jogos (id, nome, cat, preco, link, desc) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
                 (jid, nome, cat, preco, link, desc)
             )
             await db.commit()
@@ -398,7 +424,7 @@ async def processa_desc(m, state: FSMContext):
     await state.clear()
     async with aiosqlite.connect(DB) as db:
         await db.execute(
-            "INSERT INTO jogos VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
+            "INSERT INTO jogos (id, nome, cat, preco, link, desc) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
             (data['jid'], data['nome'], data['cat'], data['preco'], data['link'], desc)
         )
         await db.commit()
@@ -423,7 +449,7 @@ async def processa_encaminhado(m):
         val = float(preco_raw.replace(",", "."))
     except ValueError:
         return await m.answer("⚠️ Preco invalido na legenda.")
-    cat = cat_raw if cat_raw in CATS else "acao"
+    cat = normalizar_categoria(cat_raw) or "acao"
     origin = m.forward_origin
     chat_id = getattr(getattr(origin, "chat", None), "id", None)
     msg_id = getattr(origin, "message_id", None)
@@ -434,7 +460,7 @@ async def processa_encaminhado(m):
     jid = slugify(nome)
     async with aiosqlite.connect(DB) as db:
         await db.execute(
-            "INSERT INTO jogos VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
+            "INSERT INTO jogos (id, nome, cat, preco, link, desc) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
             (jid, nome, cat, val, link, desc)
         )
         await db.commit()
@@ -453,7 +479,7 @@ async def cmd_novo(m):
         return await m.answer("⚠️ Preço inválido.")
     async with aiosqlite.connect(DB) as db:
         await db.execute(
-            "INSERT INTO jogos VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
+            "INSERT INTO jogos (id, nome, cat, preco, link, desc) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
             (p[0].lower(), p[1], p[2].lower(), val, p[4], p[5])
         )
         await db.commit()
