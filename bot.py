@@ -149,8 +149,11 @@ async def notify_admin_sale(pid, payment=None):
             (int(pid),)
         )
         order = await cur.fetchone()
-        if not order or int(order[3] or 0) == 1:
+        if not order:
             return False
+        if int(order[3] or 0) == 1:
+            # Already sent: treat as success so repeated webhooks are acknowledged.
+            return True
         uid, jid, order_status, _already_notified, game_name, price = order
         cur = await db.execute(
             "UPDATE pedidos SET admin_notified = 1 WHERE pid = ? AND COALESCE(admin_notified, 0) = 0",
@@ -695,9 +698,21 @@ async def mercadopago_webhook(request):
         return web.Response(text="Event received; no payment id", status=200)
     try:
         payment = sdk.payment().get(int(payment_id)).get("response", {})
-        if str(payment.get("status", "")).lower() == "approved":
-            await notify_admin_sale(int(payment_id), payment)
-        print("Webhook Mercado Pago recebido:", topic or payload.get("type", "unknown"), "payment", payment_id, "status", payment.get("status", "unknown"))
+        payment_status = str(payment.get("status", "")).lower()
+        if payment_status == "approved":
+            # Mercado Pago can notify very quickly; if the order row has not
+            # been saved yet, return 5xx so the provider can retry the event.
+            async with aiosqlite.connect(DB) as db:
+                cur = await db.execute("SELECT 1 FROM pedidos WHERE pid = ?", (int(payment_id),))
+                order_exists = await cur.fetchone()
+            if not order_exists:
+                print("Webhook chegou antes do pedido ser gravado; solicitando nova tentativa:", payment_id)
+                return web.Response(text="Order not ready; retry later", status=503)
+            notified = await notify_admin_sale(int(payment_id), payment)
+            if not notified:
+                print("Notificacao pendente; solicitando nova tentativa do webhook:", payment_id)
+                return web.Response(text="Notification not completed; retry later", status=503)
+        print("Webhook Mercado Pago recebido:", topic or payload.get("type", "unknown"), "payment", payment_id, "status", payment_status or "unknown")
         return web.Response(text="OK", status=200)
     except Exception as e:
         print("Erro ao processar webhook Mercado Pago:", repr(e))
