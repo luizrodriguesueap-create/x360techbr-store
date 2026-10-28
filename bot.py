@@ -53,6 +53,9 @@ class FormCadastro(StatesGroup):
     link = State()
     descricao = State()
 
+class FormEdicao(StatesGroup):
+    valor = State()
+
 def btn(t, cb=None, u=None, s=None):
     k = {"text": t}
     if cb:
@@ -351,50 +354,51 @@ async def cmd_admin(m):
         reply_markup=kb_admin()
     )
 
-@dp.message(Command("produtos"))
-async def cmd_produtos(m):
-    if m.from_user.id != ADMIN_ID:
-        return
+async def mostrar_produtos_admin(m):
     async with aiosqlite.connect(DB) as db:
         cur = await db.execute("SELECT id, nome, preco, promo_price, promo_until, active FROM jogos ORDER BY nome")
         rows = await cur.fetchall()
     if not rows:
         return await m.answer("Nenhum produto cadastrado.")
-    lines = ["📦 Produtos cadastrados"]
-    for jid, nome, preco, promo, until, active in rows[:100]:
+    lines = ["📦 Produtos cadastrados — toque em um produto para editar:"]
+    buttons = []
+    for jid, nome, preco, promo, until, active in rows[:80]:
         status = "ATIVO" if active else "PAUSADO"
-        lines.append(f"• {jid} — {nome} — {texto_preco(preco, promo, until)} — {status}")
-    if len(rows) > 100:
-        lines.append(f"... e mais {len(rows)-100} produtos.")
-    await m.answer("\n".join(lines), parse_mode="Markdown")
+        lines.append(f"• {nome} | ID: {jid} | {texto_preco(preco, promo, until)} | {status}")
+        buttons.append([btn(("✏️ " + str(nome))[:55], cb="editprod_" + str(jid), s="primary")])
+    if len(rows) > 80:
+        lines.append(f"Mostrando os primeiros 80 de {len(rows)} produtos.")
+    buttons.append([btn("❌ Fechar", cb="cancelar_fsm")])
+    await m.answer("\n".join(lines), reply_markup=IKM(inline_keyboard=buttons))
+
+@dp.message(Command("produtos"))
+async def cmd_produtos(m):
+    if m.from_user.id != ADMIN_ID:
+        return
+    await mostrar_produtos_admin(m)
 
 @dp.message(Command("editar"))
 async def cmd_editar(m):
     if m.from_user.id != ADMIN_ID:
         return
     payload = m.text.partition(" ")[2].strip() if m.text else ""
+    if not payload:
+        return await mostrar_produtos_admin(m)
     parts = [x.strip() for x in payload.split("|", 2)]
     if len(parts) != 3 or not all(parts):
-        return await m.answer(
-            "✏️ Edição de produto existente\n\n"
-            "Formato: /editar ID | campo | novo valor\n"
-            "Campos: nome, categoria, preco, link, descricao\n\n"
-            "Exemplos:\n"
-            "/editar servidor_furtivo | preco | 9,99\n"
-            "/editar servidor_furtivo | nome | Servidor Furtivo Premium\n"
-            "/editar servidor_furtivo | categoria | servidores_furtivos\n\n"
-            "Consulte /produtos para encontrar o ID. O ID permanece igual."
-        )
+        return await m.answer("Para editar sem digitar IDs, use /editar e toque no produto da lista.\nFormato alternativo: /editar ID | campo | novo valor")
     jid, field, value = parts
-    jid, field = jid.lower(), field.lower()
+    await salvar_edicao(m, jid.lower(), field.lower(), value)
+
+async def salvar_edicao(m, jid, field, value):
     allowed = {"nome", "categoria", "preco", "link", "descricao"}
     if field not in allowed:
         return await m.answer("Campo inválido. Use: nome, categoria, preco, link ou descricao.")
     async with aiosqlite.connect(DB) as db:
-        cur = await db.execute("SELECT nome, cat, preco, link, desc FROM jogos WHERE id = ?", (jid,))
+        cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
         row = await cur.fetchone()
         if not row:
-            return await m.answer("Não encontrei esse ID. Consulte /produtos.")
+            return await m.answer("Não encontrei esse ID. Use /editar e selecione o produto na lista.")
         if field == "nome":
             if not value:
                 return await m.answer("O nome não pode ficar vazio.")
@@ -402,7 +406,7 @@ async def cmd_editar(m):
         elif field == "categoria":
             cat = normalizar_categoria(value)
             if not cat:
-                return await m.answer("Categoria inválida. Use uma categoria de /produtos/painel, por exemplo servidores_furtivos.")
+                return await m.answer("Categoria inválida. Envie uma categoria válida, como modificados ou servidores_furtivos.")
             column, new_value = "cat", cat
         elif field == "preco":
             try:
@@ -410,7 +414,7 @@ async def cmd_editar(m):
                 if new_value < 0 or new_value == float("inf") or new_value != new_value:
                     raise ValueError()
             except ValueError:
-                return await m.answer("Preço inválido. Exemplo: /editar " + jid + " | preco | 9,99")
+                return await m.answer("Preço inválido. Envie, por exemplo, 9,99.")
             column = "preco"
         elif field == "link":
             if not (value.startswith("https://") or value.startswith("http://") or value.startswith("tg://")):
@@ -422,13 +426,94 @@ async def cmd_editar(m):
         if field == "preco":
             await db.execute("UPDATE jogos SET promo_price = NULL, promo_until = NULL WHERE id = ?", (jid,))
         await db.commit()
-    return await m.answer(
-        "✅ Produto atualizado!\n"
-        f"ID: {jid}\n"
-        f"Campo alterado: {field}\n"
-        f"Novo valor: {new_value}\n\n"
-        "O ID do produto foi mantido. Use /produtos para conferir."
-    )
+    await m.answer(f"✅ Produto atualizado!\nProduto: {row[0]}\nCampo: {field}\nNovo valor: {new_value}\nID mantido: {jid}")
+
+@dp.callback_query(F.data.startswith("editprod_"))
+async def cb_editar_escolhe_produto(c, state: FSMContext):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    jid = c.data.removeprefix("editprod_")
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
+        row = await cur.fetchone()
+    if not row:
+        return await c.answer("Produto não encontrado.", show_alert=True)
+    fields = [
+        [btn("✏️ Alterar nome", cb=f"editfield|{jid}|nome")],
+        [btn("📂 Alterar categoria", cb=f"editfield|{jid}|categoria")],
+        [btn("💰 Alterar preço", cb=f"editfield|{jid}|preco")],
+        [btn("🔗 Alterar link", cb=f"editfield|{jid}|link")],
+        [btn("📝 Alterar descrição", cb=f"editfield|{jid}|descricao")],
+        [btn("◀️ Voltar aos produtos", cb="adm_voltar_produtos")]
+    ]
+    await c.answer()
+    await safe_edit(c, "Produto selecionado: " + str(row[0]) + "\n\nO que deseja alterar?", IKM(inline_keyboard=fields))
+
+@dp.callback_query(F.data.startswith("editfield|"))
+async def cb_editar_escolhe_campo(c, state: FSMContext):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    _, jid, field = c.data.split("|", 2)
+    await state.update_data(edit_jid=jid, edit_field=field)
+    await state.set_state(FormEdicao.valor)
+    labels = {"nome":"novo nome", "categoria":"nova categoria", "preco":"novo preço (ex.: 6,99)", "link":"novo link", "descricao":"nova descrição"}
+    await c.answer()
+    await safe_edit(c, f"Envie agora o {labels.get(field, field)}.\n\nEnvie /cancelar para desistir.", IKM(inline_keyboard=[[btn("❌ Cancelar", cb="cancelar_fsm")]]))
+
+@dp.message(FormEdicao.valor)
+async def processa_valor_edicao(m, state: FSMContext):
+    if m.from_user.id != ADMIN_ID:
+        return
+    if m.text and m.text.strip().lower() == "/cancelar":
+        await state.clear()
+        return await m.answer("Edição cancelada.")
+    data = await state.get_data()
+    jid, field = data.get("edit_jid"), data.get("edit_field")
+    if not jid or not field or not m.text:
+        return await m.answer("Envie um valor em texto ou use /cancelar.")
+    # Keep the state if validation fails, so the admin can retry without restarting.
+    allowed = {"nome", "categoria", "preco", "link", "descricao"}
+    if field not in allowed:
+        await state.clear()
+        return await m.answer("Campo inválido. Recomece com /editar.")
+    value = m.text.strip()
+    if field == "categoria":
+        new_value = normalizar_categoria(value)
+        if not new_value:
+            return await m.answer("Categoria inválida. Tente: modificados, servidores_furtivos, corrida, aventura.")
+    elif field == "preco":
+        try:
+            new_value = float(value.replace(",", "."))
+            if new_value < 0 or new_value == float("inf") or new_value != new_value:
+                raise ValueError()
+        except ValueError:
+            return await m.answer("Preço inválido. Envie, por exemplo, 6,99.")
+    elif field == "link":
+        if not (value.startswith("https://") or value.startswith("http://") or value.startswith("tg://")):
+            return await m.answer("Link inválido. O link deve começar com https://, http:// ou tg://.")
+        new_value = value
+    else:
+        new_value = value
+    column = {"nome":"nome", "categoria":"cat", "preco":"preco", "link":"link", "descricao":"desc"}[field]
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
+        row = await cur.fetchone()
+        if not row:
+            await state.clear()
+            return await m.answer("Não encontrei o produto no banco de dados. Use /editar para selecionar novamente.")
+        await db.execute(f"UPDATE jogos SET {column} = ? WHERE id = ?", (new_value, jid))
+        if field == "preco":
+            await db.execute("UPDATE jogos SET promo_price = NULL, promo_until = NULL WHERE id = ?", (jid,))
+        await db.commit()
+    await state.clear()
+    await m.answer(f"✅ Produto atualizado!\nAntes: {row[0]}\nCampo: {field}\nNovo valor: {new_value}\nID mantido: {jid}")
+
+@dp.callback_query(F.data == "adm_voltar_produtos")
+async def cb_adm_voltar_produtos(c):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    await c.answer()
+    await mostrar_produtos_admin(c.message)
 
 @dp.message(Command("preco"))
 async def cmd_preco(m):
