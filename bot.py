@@ -467,10 +467,53 @@ async def cb_editar_escolhe_produto(c, state: FSMContext):
         [btn("💰 Alterar preço", cb=f"editfield|{jid}|preco")],
         [btn("🔗 Alterar link", cb=f"editfield|{jid}|link")],
         [btn("📝 Alterar descrição", cb=f"editfield|{jid}|descricao")],
+        [btn("🗑️ Excluir produto", cb="delprod_" + jid, s="danger")],
         [btn("◀️ Voltar aos produtos", cb="adm_voltar_produtos")]
     ]
     await c.answer()
     await safe_edit(c, "Produto selecionado: " + str(row[0]) + "\n\nO que deseja alterar?", IKM(inline_keyboard=fields))
+
+@dp.callback_query(F.data.startswith("delprod_"))
+async def cb_excluir_produto_confirmar(c):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    jid = c.data.removeprefix("delprod_")
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
+        row = await cur.fetchone()
+    if not row:
+        return await c.answer("Produto não encontrado.", show_alert=True)
+    await c.answer()
+    await safe_edit(
+        c,
+        f"⚠️ Confirmar exclusão?\n\nProduto: {row[0]}\nID: {jid}\n\nEssa ação não pode ser desfeita.",
+        IKM(inline_keyboard=[
+            [btn("🗑️ Sim, excluir", cb="delconfirm_" + jid, s="danger")],
+            [btn("↩️ Não, voltar", cb="editprod_" + jid)]
+        ])
+    )
+
+@dp.callback_query(F.data.startswith("delconfirm_"))
+async def cb_excluir_produto_executar(c):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    jid = c.data.removeprefix("delconfirm_")
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
+        row = await cur.fetchone()
+        if not row:
+            await c.answer("Produto já não existe.", show_alert=True)
+            return
+        await db.execute("DELETE FROM jogos WHERE id = ?", (jid,))
+        await db.commit()
+    await c.answer("Produto excluído.")
+    await safe_edit(
+        c,
+        f"✅ Produto excluído: {row[0]}",
+        IKM(inline_keyboard=[
+            [btn("📦 Voltar aos produtos", cb="adm_voltar_produtos")]
+        ])
+    )
 
 @dp.callback_query(F.data.startswith("editfield|"))
 async def cb_editar_escolhe_campo(c, state: FSMContext):
