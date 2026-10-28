@@ -386,7 +386,7 @@ async def mostrar_produtos_admin(m, pagina=1):
         reply_markup=IKM(inline_keyboard=buttons)
     )
 
-@dp.callback_query(F.data.regexp(r"^adm_produtos_pg_\\d+$"))
+@dp.callback_query(F.data.regexp(r"^adm_produtos_pg_\d+$"))
 async def cb_adm_produtos_pagina(c):
     if c.from_user.id != ADMIN_ID:
         return await c.answer("Sem autorização.", show_alert=True)
