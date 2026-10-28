@@ -130,7 +130,8 @@ def texto_preco(preco, promo_price=None, promo_until=None):
 
 def kb_admin():
     return IKM(inline_keyboard=[
-        [btn("📝 Cadastrar / editar jogo", cb="adm_help_cadastro", s="primary")],
+        [btn("🆕 Cadastrar produto", cb="adm_help_cadastro", s="primary")],
+        [btn("✏️ Editar produto existente", cb="adm_help_editar", s="success")],
         [btn("💰 Alterar preço", cb="adm_help_preco", s="success")],
         [btn("🏷️ Criar promoção", cb="adm_help_promo", s="success")],
         [btn("⏹️ Encerrar promoção", cb="adm_help_fimpromo", s="primary")],
@@ -339,7 +340,9 @@ async def cmd_admin(m):
         return
     await m.answer(
         "⚙️ Painel administrativo — X360 TECH BR\n\n"
-        "Cadastro/edição: /cadastrar Nome | categoria | preço | link | descrição\n"
+        "Cadastrar produto: /cadastrar Nome | categoria | preço | link | descrição\n"
+        "Editar produto existente: /editar ID | campo | novo valor\n"
+        "Campos editáveis: nome, categoria, preco, link, descricao\n"
         "Alterar preço: /preco ID_DO_JOGO | novo_preço\n"
         "Criar promoção: /promocao ID_DO_JOGO | preço_promocional | AAAA-MM-DD\n"
         "Encerrar promoção: /fim_promocao ID_DO_JOGO\n"
@@ -364,6 +367,68 @@ async def cmd_produtos(m):
     if len(rows) > 100:
         lines.append(f"... e mais {len(rows)-100} produtos.")
     await m.answer("\n".join(lines), parse_mode="Markdown")
+
+@dp.message(Command("editar"))
+async def cmd_editar(m):
+    if m.from_user.id != ADMIN_ID:
+        return
+    payload = m.text.partition(" ")[2].strip() if m.text else ""
+    parts = [x.strip() for x in payload.split("|", 2)]
+    if len(parts) != 3 or not all(parts):
+        return await m.answer(
+            "✏️ Edição de produto existente\n\n"
+            "Formato: /editar ID | campo | novo valor\n"
+            "Campos: nome, categoria, preco, link, descricao\n\n"
+            "Exemplos:\n"
+            "/editar servidor_furtivo | preco | 9,99\n"
+            "/editar servidor_furtivo | nome | Servidor Furtivo Premium\n"
+            "/editar servidor_furtivo | categoria | servidores_furtivos\n\n"
+            "Consulte /produtos para encontrar o ID. O ID permanece igual."
+        )
+    jid, field, value = parts
+    jid, field = jid.lower(), field.lower()
+    allowed = {"nome", "categoria", "preco", "link", "descricao"}
+    if field not in allowed:
+        return await m.answer("Campo inválido. Use: nome, categoria, preco, link ou descricao.")
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT nome, cat, preco, link, desc FROM jogos WHERE id = ?", (jid,))
+        row = await cur.fetchone()
+        if not row:
+            return await m.answer("Não encontrei esse ID. Consulte /produtos.")
+        if field == "nome":
+            if not value:
+                return await m.answer("O nome não pode ficar vazio.")
+            column, new_value = "nome", value
+        elif field == "categoria":
+            cat = normalizar_categoria(value)
+            if not cat:
+                return await m.answer("Categoria inválida. Use uma categoria de /produtos/painel, por exemplo servidores_furtivos.")
+            column, new_value = "cat", cat
+        elif field == "preco":
+            try:
+                new_value = float(value.replace(",", "."))
+                if new_value < 0 or new_value == float("inf") or new_value != new_value:
+                    raise ValueError()
+            except ValueError:
+                return await m.answer("Preço inválido. Exemplo: /editar " + jid + " | preco | 9,99")
+            column = "preco"
+        elif field == "link":
+            if not (value.startswith("https://") or value.startswith("http://") or value.startswith("tg://")):
+                return await m.answer("Link inválido. Use um endereço https://, http:// ou tg://.")
+            column, new_value = "link", value
+        else:
+            column, new_value = "desc", value
+        await db.execute(f"UPDATE jogos SET {column} = ? WHERE id = ?", (new_value, jid))
+        if field == "preco":
+            await db.execute("UPDATE jogos SET promo_price = NULL, promo_until = NULL WHERE id = ?", (jid,))
+        await db.commit()
+    return await m.answer(
+        "✅ Produto atualizado!\n"
+        f"ID: {jid}\n"
+        f"Campo alterado: {field}\n"
+        f"Novo valor: {new_value}\n\n"
+        "O ID do produto foi mantido. Use /produtos para conferir."
+    )
 
 @dp.message(Command("preco"))
 async def cmd_preco(m):
@@ -455,7 +520,8 @@ async def cb_admin_help(c):
         return await c.answer("Sem autorização.", show_alert=True)
     key = c.data.replace("adm_help_", "")
     messages = {
-        "cadastro": "Para cadastrar ou editar: /cadastrar Nome | categoria | preço | link | descrição\nSe o ID já existir, os dados serão atualizados.",
+        "cadastro": "Para cadastrar um produto novo: /cadastrar Nome | categoria | preço | link | descrição",
+        "editar": "Para editar um produto existente: /editar ID | campo | novo valor\nCampos: nome, categoria, preco, link, descricao\nExemplo: /editar servidor_furtivo | preco | 9,99\nO ID não muda. Consulte /produtos.",
         "preco": "Para alterar preço: /preco ID_DO_JOGO | 5,99\nConsulte /produtos para ver os IDs.",
         "promo": "Para criar promoção: /promocao ID_DO_JOGO | 2,99 | 2026-11-30",
         "fimpromo": "Para encerrar antes da data: /fim_promocao ID_DO_JOGO",
