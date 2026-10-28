@@ -354,22 +354,45 @@ async def cmd_admin(m):
         reply_markup=kb_admin()
     )
 
-async def mostrar_produtos_admin(m):
+async def mostrar_produtos_admin(m, pagina=1):
+    # Keep the message short: a long text list can exceed Telegram's 4096-char limit.
+    limite = 10
     async with aiosqlite.connect(DB) as db:
-        cur = await db.execute("SELECT id, nome, preco, promo_price, promo_until, active FROM jogos ORDER BY nome")
+        cur = await db.execute("SELECT COUNT(*) FROM jogos")
+        total = (await cur.fetchone())[0]
+        cur = await db.execute(
+            "SELECT id, nome, preco, promo_price, promo_until, active FROM jogos ORDER BY nome LIMIT ? OFFSET ?",
+            (limite, (pagina - 1) * limite)
+        )
         rows = await cur.fetchall()
-    if not rows:
+    if not total:
         return await m.answer("Nenhum produto cadastrado.")
-    lines = ["📦 Produtos cadastrados — toque em um produto para editar:"]
+    total_paginas = max(1, (total + limite - 1) // limite)
     buttons = []
-    for jid, nome, preco, promo, until, active in rows[:80]:
-        status = "ATIVO" if active else "PAUSADO"
-        lines.append(f"• {nome} | ID: {jid} | {texto_preco(preco, promo, until)} | {status}")
-        buttons.append([btn(("✏️ " + str(nome))[:55], cb="editprod_" + str(jid), s="primary")])
-    if len(rows) > 80:
-        lines.append(f"Mostrando os primeiros 80 de {len(rows)} produtos.")
+    for jid, nome, preco, promo, until, active in rows:
+        status = "⏸️ " if not active else ""
+        atual = preco_efetivo(preco, promo, until)
+        buttons.append([btn((status + str(nome) + " — R$ " + f"{atual:.2f}")[:60], cb="editprod_" + str(jid), s="primary")])
+    nav = []
+    if pagina > 1:
+        nav.append(btn("⬅️ Anterior", cb=f"adm_produtos_pg_{pagina-1}"))
+    nav.append(btn(f"Página {pagina}/{total_paginas}", cb="noop"))
+    if pagina < total_paginas:
+        nav.append(btn("Próxima ➡️", cb=f"adm_produtos_pg_{pagina+1}"))
+    buttons.append(nav)
     buttons.append([btn("❌ Fechar", cb="cancelar_fsm")])
-    await m.answer("\n".join(lines), reply_markup=IKM(inline_keyboard=buttons))
+    await m.answer(
+        f"📦 Produtos cadastrados ({total})\nToque no produto que deseja editar:",
+        reply_markup=IKM(inline_keyboard=buttons)
+    )
+
+@dp.callback_query(F.data.regexp(r"^adm_produtos_pg_\\d+$"))
+async def cb_adm_produtos_pagina(c):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    pagina = int(c.data.rsplit("_", 1)[1])
+    await c.answer()
+    await mostrar_produtos_admin(c.message, pagina)
 
 @dp.message(Command("produtos"))
 async def cmd_produtos(m):
@@ -454,11 +477,40 @@ async def cb_editar_escolhe_campo(c, state: FSMContext):
     if c.from_user.id != ADMIN_ID:
         return await c.answer("Sem autorização.", show_alert=True)
     _, jid, field = c.data.split("|", 2)
+    if field == "categoria":
+        botoes = []
+        chaves = list(CATS.keys()) + ["gratis", "dashboards"]
+        for i in range(0, len(chaves), 2):
+            par = chaves[i:i+2]
+            botoes.append([btn(CATS.get(k, {"gratis":"🎁 Desbloqueios grátis","dashboards":"🖥️ Dashboards"}[k] if k in {"gratis","dashboards"} else k), cb=f"editcat|{jid}|{k}") for k in par])
+        botoes.append([btn("❌ Cancelar", cb="cancelar_fsm")])
+        await c.answer()
+        return await safe_edit(c, "Escolha a nova categoria do produto:", IKM(inline_keyboard=botoes))
     await state.update_data(edit_jid=jid, edit_field=field)
     await state.set_state(FormEdicao.valor)
-    labels = {"nome":"novo nome", "categoria":"nova categoria", "preco":"novo preço (ex.: 6,99)", "link":"novo link", "descricao":"nova descrição"}
+    labels = {"nome":"novo nome", "preco":"novo preço (ex.: 6,99)", "link":"novo link", "descricao":"nova descrição"}
     await c.answer()
     await safe_edit(c, f"Envie agora o {labels.get(field, field)}.\n\nEnvie /cancelar para desistir.", IKM(inline_keyboard=[[btn("❌ Cancelar", cb="cancelar_fsm")]]))
+
+@dp.callback_query(F.data.startswith("editcat|"))
+async def cb_editar_categoria_direta(c):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    _, jid, cat = c.data.split("|", 2)
+    if cat not in CATS and cat not in {"gratis", "dashboards"}:
+        return await c.answer("Categoria inválida.", show_alert=True)
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
+        row = await cur.fetchone()
+        if not row:
+            return await c.answer("Produto não encontrado.", show_alert=True)
+        await db.execute("UPDATE jogos SET cat = ? WHERE id = ?", (cat, jid))
+        await db.commit()
+    await c.answer("Categoria atualizada!")
+    await safe_edit(c, f"✅ Categoria atualizada!\nProduto: {row[0]}\nNova categoria: {CATS.get(cat, cat)}", IKM(inline_keyboard=[
+        [btn("✏️ Continuar editando", cb="editprod_" + jid)],
+        [btn("📦 Voltar aos produtos", cb="adm_voltar_produtos")]
+    ]))
 
 @dp.message(FormEdicao.valor)
 async def processa_valor_edicao(m, state: FSMContext):
@@ -506,7 +558,13 @@ async def processa_valor_edicao(m, state: FSMContext):
             await db.execute("UPDATE jogos SET promo_price = NULL, promo_until = NULL WHERE id = ?", (jid,))
         await db.commit()
     await state.clear()
-    await m.answer(f"✅ Produto atualizado!\nAntes: {row[0]}\nCampo: {field}\nNovo valor: {new_value}\nID mantido: {jid}")
+    await m.answer(
+        f"✅ Produto atualizado!\nAntes: {row[0]}\nCampo: {field}\nNovo valor: {new_value}\nID mantido: {jid}",
+        reply_markup=IKM(inline_keyboard=[
+            [btn("✏️ Continuar editando", cb="editprod_" + jid)],
+            [btn("📦 Voltar aos produtos", cb="adm_voltar_produtos")]
+        ])
+    )
 
 @dp.callback_query(F.data == "adm_voltar_produtos")
 async def cb_adm_voltar_produtos(c):
