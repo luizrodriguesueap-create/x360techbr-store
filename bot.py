@@ -338,14 +338,14 @@ async def cmd_admin(m):
     if m.from_user.id != ADMIN_ID:
         return
     await m.answer(
-        "⚙️ **Painel administrativo — X360 TECH BR**\n\n"
+        "⚙️ Painel administrativo — X360 TECH BR\n\n"
         "Cadastro/edição: /cadastrar Nome | categoria | preço | link | descrição\n"
         "Alterar preço: /preco ID_DO_JOGO | novo_preço\n"
         "Criar promoção: /promocao ID_DO_JOGO | preço_promocional | AAAA-MM-DD\n"
         "Encerrar promoção: /fim_promocao ID_DO_JOGO\n"
         "Pausar/reativar: /pausar ID_DO_JOGO ou /ativar ID_DO_JOGO\n\n"
         "Use /produtos para consultar os IDs.",
-        reply_markup=kb_admin(), parse_mode="Markdown"
+        reply_markup=kb_admin()
     )
 
 @dp.message(Command("produtos"))
@@ -357,7 +357,7 @@ async def cmd_produtos(m):
         rows = await cur.fetchall()
     if not rows:
         return await m.answer("Nenhum produto cadastrado.")
-    lines = ["📦 **Produtos cadastrados**"]
+    lines = ["📦 Produtos cadastrados"]
     for jid, nome, preco, promo, until, active in rows[:100]:
         status = "ATIVO" if active else "PAUSADO"
         lines.append(f"• {jid} — {nome} — {texto_preco(preco, promo, until)} — {status}")
