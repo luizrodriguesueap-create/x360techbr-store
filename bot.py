@@ -1,4 +1,4 @@
-import os, asyncio, urllib.parse, aiosqlite, mercadopago, re
+import os, asyncio, urllib.parse, aiosqlite, mercadopago, re, hashlib, hmac
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from aiohttp import web
@@ -1212,6 +1212,32 @@ async def cb_np(c):
 async def ping(request):
     return web.Response(text="Online!")
 
+
+# The secret is derived from the bot token, so no additional paid service or
+# manually entered Render environment variable is required. Telegram accepts
+# hexadecimal characters in both the webhook path and secret_token header.
+WEBHOOK_SECRET = hashlib.sha256(TOKEN.encode("utf-8")).hexdigest()
+WEBHOOK_PATH = "/telegram/" + WEBHOOK_SECRET
+PUBLIC_URL = os.getenv("RENDER_EXTERNAL_URL", "https://x360techbr-store.onrender.com").rstrip("/")
+
+
+async def telegram_webhook(request):
+    supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not supplied_secret or not hmac.compare_digest(supplied_secret, WEBHOOK_SECRET):
+        return web.Response(text="Forbidden", status=403)
+    try:
+        payload = await request.json()
+        from aiogram.types import Update
+        update = Update.model_validate(payload, context={"bot": bot})
+    except Exception:
+        return web.Response(text="Invalid update", status=400)
+    try:
+        await dp.feed_update(bot, update)
+        return web.Response(text="OK", status=200)
+    except Exception as e:
+        print("Erro ao processar update do Telegram:", repr(e))
+        return web.Response(text="Temporary processing error", status=500)
+
 async def mercadopago_webhook(request):
     """Receive Mercado Pago events; always verify payment status via the API."""
     if not sdk:
@@ -1256,18 +1282,33 @@ def make_web_app():
     app.router.add_get("/", ping)
     app.router.add_get("/healthz", ping)
     app.router.add_post("/mercadopago/webhook", mercadopago_webhook)
+    app.router.add_post(WEBHOOK_PATH, telegram_webhook)
     return app
 
 async def main():
+    if not TOKEN:
+        raise RuntimeError("BOT_TOKEN não configurado no ambiente.")
     await init_db()
     app = make_web_app()
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
-    await site.start()
-    print("🚀 Web server ativo na porta " + str(PORT) + "!")
-    print("🚀 Polling do Bot iniciado!")
-    await dp.start_polling(bot)
+    try:
+        await site.start()
+        print("🚀 Servidor web ativo na porta " + str(PORT) + "!")
+        webhook_url = PUBLIC_URL + WEBHOOK_PATH
+        # Keep pending updates: never discard customer messages during deploys.
+        await bot.set_webhook(
+            url=webhook_url,
+            secret_token=WEBHOOK_SECRET,
+            max_connections=1,
+            drop_pending_updates=False,
+        )
+        print("🚀 Webhook do Telegram configurado com segurança.")
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
