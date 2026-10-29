@@ -133,12 +133,11 @@ def texto_preco(preco, promo_price=None, promo_until=None):
 
 def kb_admin():
     return IKM(inline_keyboard=[
-        [btn("🆕 Cadastrar produto", cb="adm_help_cadastro", s="primary")],
-        [btn("✏️ Editar produto existente", cb="adm_help_editar", s="success")],
-        [btn("💰 Alterar preço", cb="adm_help_preco", s="success")],
-        [btn("🏷️ Criar promoção", cb="adm_help_promo", s="success")],
-        [btn("⏹️ Encerrar promoção", cb="adm_help_fimpromo", s="primary")],
-        [btn("📦 Pausar / reativar produto", cb="adm_help_ativo", s="primary")],
+        [btn("🆕 Cadastrar produto", cb="adm_cadastrar", s="primary")],
+        [btn("✏️ Editar produto", cb="adm_editar", s="success"), btn("🗑️ Excluir produto", cb="adm_excluir", s="danger")],
+        [btn("📦 Ver catálogo", cb="adm_editar", s="primary")],
+        [btn("💰 Preços e promoções", cb="adm_help_promo", s="success")],
+        [btn("📊 Estatísticas", cb="adm_stats", s="primary")],
         [btn("◀️ Voltar ao início", cb="voltar_ini", s="primary")]
     ])
 
@@ -342,17 +341,94 @@ async def cmd_admin(m):
     if m.from_user.id != ADMIN_ID:
         return
     await m.answer(
-        "⚙️ Painel administrativo — X360 TECH BR\n\n"
-        "Cadastrar produto: /cadastrar Nome | categoria | preço | link | descrição\n"
-        "Editar produto existente: /editar ID | campo | novo valor\n"
-        "Campos editáveis: nome, categoria, preco, link, descricao\n"
-        "Alterar preço: /preco ID_DO_JOGO | novo_preço\n"
-        "Criar promoção: /promocao ID_DO_JOGO | preço_promocional | AAAA-MM-DD\n"
-        "Encerrar promoção: /fim_promocao ID_DO_JOGO\n"
-        "Pausar/reativar: /pausar ID_DO_JOGO ou /ativar ID_DO_JOGO\n\n"
-        "Use /produtos para consultar os IDs.",
-        reply_markup=kb_admin()
+        "⚙️ **Painel administrativo — X360 TECH BR**\n\n"
+        "Escolha uma opção abaixo. Para cadastrar, editar ou excluir, basta tocar nos botões e seguir as instruções.\n\n"
+        "✅ Não precisa decorar IDs nem comandos.\n"
+        "↩️ As etapas terão opção de cancelar.",
+        reply_markup=kb_admin(), parse_mode="Markdown"
     )
+
+
+@dp.callback_query(F.data == "adm_cadastrar")
+async def cb_admin_cadastrar(c, state: FSMContext):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    await state.clear()
+    await state.set_state(FormCadastro.nome)
+    await c.answer()
+    await safe_edit(c, "🆕 **Novo produto**\n\n1/5 — Envie o nome do produto.\n\nA qualquer momento, toque em Cancelar para sair.", IKM(inline_keyboard=[[btn("❌ Cancelar", cb="cancelar_fsm")]]))
+
+
+@dp.callback_query(F.data == "adm_editar")
+async def cb_admin_editar(c):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    await c.answer()
+    await mostrar_produtos_admin(c.message)
+
+
+async def mostrar_produtos_excluir_admin(m, pagina=1):
+    limite = 10
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT COUNT(*) FROM jogos")
+        total = (await cur.fetchone())[0]
+        cur = await db.execute("SELECT id, nome, preco, promo_price, promo_until, active FROM jogos ORDER BY nome LIMIT ? OFFSET ?", (limite, (pagina - 1) * limite))
+        rows = await cur.fetchall()
+    if not total:
+        return await m.answer("Nenhum produto cadastrado.", reply_markup=kb_admin())
+    paginas = max(1, (total + limite - 1) // limite)
+    buttons = []
+    for jid, nome, preco, promo, until, active in rows:
+        status = "⏸️ " if not active else ""
+        atual = preco_efetivo(preco, promo, until)
+        buttons.append([btn((status + str(nome) + " — R$ " + f"{atual:.2f}")[:60], cb="delprod_" + str(jid), s="danger")])
+    nav = []
+    if pagina > 1:
+        nav.append(btn("⬅️ Anterior", cb=f"adm_delpg_{pagina-1}"))
+    nav.append(btn(f"Página {pagina}/{paginas}", cb="noop"))
+    if pagina < paginas:
+        nav.append(btn("Próxima ➡️", cb=f"adm_delpg_{pagina+1}"))
+    buttons.append(nav)
+    buttons.append([btn("↩️ Voltar ao painel", cb="adm_back")])
+    await m.answer(f"🗑️ **Excluir produto** — catálogo com {total} produtos\n\nSelecione o produto. O bot pedirá confirmação antes de excluir:", reply_markup=IKM(inline_keyboard=buttons), parse_mode="Markdown")
+
+
+@dp.callback_query(F.data == "adm_excluir")
+async def cb_admin_excluir(c):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    await c.answer()
+    await mostrar_produtos_excluir_admin(c.message)
+
+
+@dp.callback_query(F.data.regexp(r"^adm_delpg_\d+$"))
+async def cb_admin_excluir_pagina(c):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    pagina = int(c.data.rsplit("_", 1)[1])
+    await c.answer()
+    await mostrar_produtos_excluir_admin(c.message, pagina)
+
+
+@dp.callback_query(F.data == "adm_back")
+async def cb_admin_voltar(c):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    await c.answer()
+    await safe_edit(c, "⚙️ **Painel administrativo — X360 TECH BR**\n\nEscolha uma opção:", kb_admin())
+
+
+@dp.callback_query(F.data == "adm_stats")
+async def cb_admin_stats(c):
+    if c.from_user.id != ADMIN_ID:
+        return await c.answer("Sem autorização.", show_alert=True)
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT COUNT(*), SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END), SUM(CASE WHEN preco = 0 AND active = 1 THEN 1 ELSE 0 END), SUM(CASE WHEN preco > 0 AND active = 1 THEN 1 ELSE 0 END) FROM jogos")
+        total, ativos, gratis, pagos = await cur.fetchone()
+        cur = await db.execute("SELECT COUNT(*) FROM pedidos")
+        pedidos = (await cur.fetchone())[0]
+    await c.answer()
+    await safe_edit(c, f"📊 **Resumo da loja**\n\n📦 Produtos cadastrados: {total or 0}\n✅ Produtos ativos: {ativos or 0}\n🎁 Produtos gratuitos: {gratis or 0}\n💰 Produtos pagos: {pagos or 0}\n🧾 Pedidos registrados: {pedidos or 0}", IKM(inline_keyboard=[[btn("↩️ Voltar ao painel", cb="adm_back")]]))
 
 async def mostrar_produtos_admin(m, pagina=1):
     # Keep the message short: a long text list can exceed Telegram's 4096-char limit.
