@@ -264,7 +264,7 @@ async def notify_admin_sale(pid, payment=None):
 def kb_inicio():
     return IKM(inline_keyboard=[
         [btn("🟢 Desbloqueios (Gratis)", cb="menu_desb", s="success")],
-        [btn("🟢 Dashboards (Aurora & Nexus)", cb="menu_dash", s="success")],
+        [btn("🟢 Dashboards", cb="menu_dash", s="success")],
         [btn("🔵 Catalogo de Jogos (GOD / XEX)", cb="menu_cat", s="primary")],
         [btn("🛠️ Jogos Modificados para Xbox 360", cb="c_modificados_1", s="primary")],
         [btn("🛰️ Servidores Furtivos", cb="c_servidores_furtivos_1", s="success")],
@@ -278,12 +278,20 @@ def kb_desb():
         [btn("◀️ Voltar ao Inicio", cb="voltar_ini")]
     ])
 
-def kb_dash():
-    return IKM(inline_keyboard=[
-        [btn("🟢 Aurora", cb="info_dash_aurora", s="success")],
-        [btn("🟢 Nexus", cb="info_dash_nexus", s="success")],
-        [btn("◀️ Voltar ao Inicio", cb="voltar_ini")]
-    ])
+async def kb_dash():
+    botoes = []
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute(
+            "SELECT id, nome FROM jogos WHERE cat = ? AND active = 1 ORDER BY nome",
+            ("dashboards",)
+        )
+        produtos = await cur.fetchall()
+    for jid, nome in produtos:
+        botoes.append([btn("🟢 " + str(nome), cb="info_" + str(jid), s="success")])
+    if not produtos:
+        botoes.append([btn("ℹ️ Nenhum dashboard disponível", cb="noop")])
+    botoes.append([btn("◀️ Voltar ao Inicio", cb="voltar_ini")])
+    return IKM(inline_keyboard=botoes)
 
 def kb_categorias():
     k = list(CATS.keys())
@@ -1029,7 +1037,7 @@ async def cb_db(c):
 @dp.callback_query(F.data == "menu_dash")
 async def cb_dh(c):
     await c.answer()
-    await safe_edit(c, "🎁 **Dashboards Gratuitas:**\nEscolha a interface:", kb_dash())
+    await safe_edit(c, "🎁 **Dashboards Gratuitas:**\nEscolha a interface:", await kb_dash())
 
 @dp.callback_query(F.data == "menu_cat")
 async def cb_ct(c):
