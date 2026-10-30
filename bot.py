@@ -190,8 +190,15 @@ async def init_db():
             ('limbo', 'Limbo', 'plataforma', 4.99, 'https://t.me/c/4434900523/5', 'Jogo completo Limbo para Xbox 360 RGH/JTAG.'),
             ('crazy_taxi', 'Crazy Taxi', 'corrida', 4.99, 'https://t.me/c/4434900523/8', 'Classico Crazy Taxi pronto para pendrive.')
         ]
-        # Seeds are added only when missing; never overwrite or delete catalog entries on startup.
-        await db.executemany("INSERT OR IGNORE INTO jogos (id, nome, cat, preco, link, desc) VALUES (?,?,?,?,?,?)", itens)
+        # Populate defaults only on a genuinely empty database.
+        # Do not recreate an item intentionally deleted by the administrator after a restart.
+        cur = await db.execute("SELECT COUNT(*) FROM jogos")
+        catalog_count = (await cur.fetchone())[0]
+        if catalog_count == 0:
+            await db.executemany(
+                "INSERT INTO jogos (id, nome, cat, preco, link, desc) VALUES (?,?,?,?,?,?)",
+                itens
+            )
         # Several items were accidentally seeded with the Nexus post URL.
         # Keep that URL for Nexus only; disable it for Aurora and unrelated unlocks
         # until their correct Telegram post links are supplied.
