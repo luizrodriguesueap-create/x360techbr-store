@@ -1,4 +1,4 @@
-import os, asyncio, urllib.parse, aiosqlite, mercadopago, re, hashlib, hmac
+import os, sys, asyncio, urllib.parse, aiosqlite, mercadopago, re, hashlib, hmac, logging, json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from aiohttp import web
@@ -7,6 +7,16 @@ from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardButton as IKB, InlineKeyboardMarkup as IKM
+from aiogram.types import ErrorEvent
+from aiogram import BaseMiddleware
+
+# Render only shows logs promptly when output is not buffered.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 MP_KEY = os.getenv("MP_ACCESS_TOKEN", "").strip()
@@ -17,6 +27,132 @@ sdk = mercadopago.SDK(MP_KEY) if MP_KEY else None
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 DB = "x360_store.db"
+
+# ---------------------------------------------------------------------------
+# Database layer
+# With DATABASE_URL set (Neon/Postgres) all data lives OUTSIDE the Render
+# instance and survives restarts, sleeps and deploys.
+# Without it the bot falls back to a local SQLite file, which Render's free
+# plan erases on every restart. That mode is only a safety net.
+# ---------------------------------------------------------------------------
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+USE_PG = bool(DATABASE_URL)
+_pg_pool = None
+_pg_pool_lock = asyncio.Lock()
+
+def _clean_dsn(url):
+    # asyncpg does not understand libpq-only options such as channel_binding;
+    # TLS is requested separately, so keep only scheme/user/host/path.
+    parts = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+async def get_pg_pool():
+    global _pg_pool
+    async with _pg_pool_lock:
+        if _pg_pool is None:
+            import asyncpg
+            ssl_mode = "disable" if os.getenv("DATABASE_SSL", "require").lower() == "disable" else "require"
+            _pg_pool = await asyncpg.create_pool(
+                _clean_dsn(DATABASE_URL),
+                ssl=(False if ssl_mode == "disable" else "require"),
+                min_size=1,
+                max_size=5,
+                statement_cache_size=0,               # works with Neon's pooled endpoint too
+                max_inactive_connection_lifetime=90,  # drop idle links before Neon suspends them
+                command_timeout=30,
+                timeout=30,
+            )
+        return _pg_pool
+
+def _to_pg(sql):
+    """Translate the SQLite-style SQL used by the bot to PostgreSQL."""
+    out, n, quote = [], 0, False
+    for ch in sql:
+        if ch == "'":
+            quote = not quote
+            out.append(ch)
+        elif ch == "?" and not quote:
+            n += 1
+            out.append("$" + str(n))
+        else:
+            out.append(ch)
+    text = "".join(out)
+    text = re.sub(r'(?<![\w"])desc(?![\w"])', '"desc"', text)  # DESC is reserved in Postgres
+    text = re.sub(r"\bLIKE\b", "ILIKE", text)                  # case-insensitive search
+    return text
+
+class PGCursor:
+    def __init__(self, rows):
+        self._rows = rows
+        self._i = 0
+    async def fetchone(self):
+        if self._i < len(self._rows):
+            self._i += 1
+            return self._rows[self._i - 1]
+        return None
+    async def fetchall(self):
+        rest = self._rows[self._i:]
+        self._i = len(self._rows)
+        return rest
+
+class PGConn:
+    """Small adapter exposing the subset of the aiosqlite API the bot uses."""
+    async def __aenter__(self):
+        pool = await get_pg_pool()
+        self._pool = pool
+        self._conn = await pool.acquire()
+        self._tr = self._conn.transaction()
+        await self._tr.start()
+        self._used = False
+        return self
+
+    async def _fresh(self):
+        # The previous link died (for example Neon suspended); take another one.
+        try:
+            await self._pool.release(self._conn)
+        except Exception:
+            pass
+        self._conn = await self._pool.acquire()
+        self._tr = self._conn.transaction()
+        await self._tr.start()
+
+    async def execute(self, sql, params=()):
+        import asyncpg
+        text = _to_pg(sql)
+        is_read = text.lstrip().split(None, 1)[0].upper() in ("SELECT", "WITH")
+        for attempt in (1, 2):
+            try:
+                if is_read:
+                    rows = await self._conn.fetch(text, *params)
+                    self._used = True
+                    return PGCursor([tuple(r) for r in rows])
+                await self._conn.execute(text, *params)
+                self._used = True
+                return PGCursor([])
+            except (asyncpg.exceptions.ConnectionDoesNotExistError,
+                    asyncpg.exceptions.InterfaceError, OSError):
+                if attempt == 2 or self._used:
+                    raise
+                await self._fresh()
+
+    async def commit(self):
+        await self._tr.commit()
+        self._tr = self._conn.transaction()
+        await self._tr.start()
+
+    async def __aexit__(self, exc_type, exc, tb):
+        try:
+            await self._tr.rollback()   # anything not committed is discarded, like SQLite
+        except Exception:
+            pass
+        finally:
+            try:
+                await self._pool.release(self._conn)
+            except Exception:
+                pass
+
+def dbconn():
+    return PGConn() if USE_PG else aiosqlite.connect(DB)
 
 TXT_INI = (
     "🎮 **X360 TECH BR | Loja Oficial**\n"
@@ -166,10 +302,33 @@ async def entregar_conteudo(user_id, link, nome_jogo):
         return True
 
 async def init_db():
+    """Create tables. No default products are ever inserted automatically:
+    the catalogue is exactly what the administrator registered."""
+    if USE_PG:
+        for tentativa in range(1, 7):
+            try:
+                async with dbconn() as db:
+                    await db.execute(
+                        "CREATE TABLE IF NOT EXISTS jogos (id TEXT PRIMARY KEY, nome TEXT, cat TEXT, "
+                        "preco DOUBLE PRECISION, link TEXT, desc TEXT, promo_price DOUBLE PRECISION, "
+                        "promo_until TEXT, active INTEGER NOT NULL DEFAULT 1)"
+                    )
+                    await db.execute(
+                        "CREATE TABLE IF NOT EXISTS pedidos (pid BIGINT PRIMARY KEY, uid BIGINT, jid TEXT, "
+                        "st TEXT, admin_notified INTEGER NOT NULL DEFAULT 0)"
+                    )
+                    await db.commit()
+                print("✅ Banco PostgreSQL pronto (dados persistentes).")
+                return
+            except Exception as e:
+                print("Falha ao preparar o banco (tentativa", tentativa, "de 6):", repr(e))
+                if tentativa == 6:
+                    raise
+                await asyncio.sleep(3 * tentativa)
+    print("⚠️ DATABASE_URL não configurada: usando SQLite temporário. OS DADOS SERÃO PERDIDOS a cada reinício!")
     async with aiosqlite.connect(DB) as db:
         await db.execute("CREATE TABLE IF NOT EXISTS jogos (id TEXT PRIMARY KEY, nome TEXT, cat TEXT, preco REAL, link TEXT, desc TEXT)")
         await db.execute("CREATE TABLE IF NOT EXISTS pedidos (pid INT PRIMARY KEY, uid INT, jid TEXT, st TEXT)")
-        # Backward-compatible migration for one-time admin sale notifications.
         cols = await db.execute("PRAGMA table_info(pedidos)")
         col_names = {row[1] for row in await cols.fetchall()}
         if "admin_notified" not in col_names:
@@ -182,30 +341,6 @@ async def init_db():
             await db.execute("ALTER TABLE jogos ADD COLUMN promo_until TEXT")
         if "active" not in game_col_names:
             await db.execute("ALTER TABLE jogos ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
-        itens = [
-            ('abadavatar', 'Desbloqueio AbadAvatar', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Guia e ficheiros para desbloqueio AbadAvatar.'),
-            ('rockband', 'Desbloqueio Rock Band', 'gratis', 0.0, 'https://t.me/c/4434900523/2', 'Ficheiros essenciais para desbloqueio Rock Band.'),
-            ('dash_aurora', 'Aurora', 'dashboards', 0.0, 'https://t.me/c/4434900523/2', 'Interface moderna com capas automaticas.'),
-            ('dash_nexus', 'Nexus', 'dashboards', 0.0, 'https://t.me/c/4434900523/2', 'Dashboard com menus rapidos e plugins.'),
-            ('limbo', 'Limbo', 'plataforma', 4.99, 'https://t.me/c/4434900523/5', 'Jogo completo Limbo para Xbox 360 RGH/JTAG.'),
-            ('crazy_taxi', 'Crazy Taxi', 'corrida', 4.99, 'https://t.me/c/4434900523/8', 'Classico Crazy Taxi pronto para pendrive.')
-        ]
-        # Populate defaults only on a genuinely empty database.
-        # Do not recreate an item intentionally deleted by the administrator after a restart.
-        cur = await db.execute("SELECT COUNT(*) FROM jogos")
-        catalog_count = (await cur.fetchone())[0]
-        if catalog_count == 0:
-            await db.executemany(
-                "INSERT INTO jogos (id, nome, cat, preco, link, desc) VALUES (?,?,?,?,?,?)",
-                itens
-            )
-        # Several items were accidentally seeded with the Nexus post URL.
-        # Keep that URL for Nexus only; disable it for Aurora and unrelated unlocks
-        # until their correct Telegram post links are supplied.
-        await db.execute(
-            "UPDATE jogos SET link = '' WHERE id IN ('dash_aurora', 'abadavatar', 'rockband') "
-            "AND link = 'https://t.me/c/4434900523/2'"
-        )
         await db.commit()
 
 SALE_NOTIFY_LOCK = asyncio.Lock()
@@ -226,7 +361,7 @@ async def notify_admin_sale(pid, payment=None):
     # Serialize notifications in this process. Save the sent flag only after
     # Telegram accepts the message, so a send failure does not suppress retries.
     async with SALE_NOTIFY_LOCK:
-        async with aiosqlite.connect(DB) as db:
+        async with dbconn() as db:
             cur = await db.execute(
                 "SELECT p.uid, p.jid, p.st, p.admin_notified, j.nome, j.preco "
                 "FROM pedidos p LEFT JOIN jogos j ON j.id = p.jid WHERE p.pid = ?",
@@ -255,7 +390,7 @@ async def notify_admin_sale(pid, payment=None):
             print("Falha ao enviar notificacao de venda:", e)
             return False
 
-        async with aiosqlite.connect(DB) as db:
+        async with dbconn() as db:
             await db.execute("UPDATE pedidos SET admin_notified = 1 WHERE pid = ?", (int(pid),))
             await db.commit()
         print("Notificacao de venda enviada ao administrador para pedido", pid)
@@ -280,7 +415,7 @@ def kb_desb():
 
 async def kb_dash():
     botoes = []
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute(
             "SELECT id, nome FROM jogos WHERE cat = ? AND active = 1 ORDER BY nome",
             ("dashboards",)
@@ -316,7 +451,7 @@ def kb_escolher_categoria():
 
 async def kb_lista(ck, pg=1):
     off = (pg - 1) * 6
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         c1 = await db.execute("SELECT COUNT(*) FROM jogos WHERE cat = ? AND active = 1", (ck,))
         tot = (await c1.fetchone())[0]
         c2 = await db.execute("SELECT id, nome, preco, promo_price, promo_until FROM jogos WHERE cat = ? AND active = 1 ORDER BY nome ASC LIMIT 6 OFFSET ?", (ck, off))
@@ -356,13 +491,13 @@ async def cmd_admin(m):
     if m.from_user.id != ADMIN_ID:
         return
     await m.answer(
+        ("⚠️ **ATENÇÃO: banco temporário** — configure DATABASE_URL, senão os cadastros somem.\n\n" if not USE_PG else "") +
         "⚙️ **Painel administrativo — X360 TECH BR**\n\n"
         "Escolha uma opção abaixo. Para cadastrar, editar ou excluir, basta tocar nos botões e seguir as instruções.\n\n"
         "✅ Não precisa decorar IDs nem comandos.\n"
         "↩️ As etapas terão opção de cancelar.",
         reply_markup=kb_admin(), parse_mode="Markdown"
     )
-
 
 @dp.callback_query(F.data == "adm_cadastrar")
 async def cb_admin_cadastrar(c, state: FSMContext):
@@ -384,7 +519,7 @@ async def cb_admin_editar(c):
 
 async def mostrar_produtos_excluir_admin(m, pagina=1):
     limite = 10
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute("SELECT COUNT(*) FROM jogos")
         total = (await cur.fetchone())[0]
         cur = await db.execute("SELECT id, nome, preco, promo_price, promo_until, active FROM jogos ORDER BY nome LIMIT ? OFFSET ?", (limite, (pagina - 1) * limite))
@@ -437,7 +572,7 @@ async def cb_admin_voltar(c):
 async def cb_admin_stats(c):
     if c.from_user.id != ADMIN_ID:
         return await c.answer("Sem autorização.", show_alert=True)
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute("SELECT COUNT(*), SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END), SUM(CASE WHEN preco = 0 AND active = 1 THEN 1 ELSE 0 END), SUM(CASE WHEN preco > 0 AND active = 1 THEN 1 ELSE 0 END) FROM jogos")
         total, ativos, gratis, pagos = await cur.fetchone()
         cur = await db.execute("SELECT COUNT(*) FROM pedidos")
@@ -448,7 +583,7 @@ async def cb_admin_stats(c):
 async def mostrar_produtos_admin(m, pagina=1):
     # Keep the message short: a long text list can exceed Telegram's 4096-char limit.
     limite = 10
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute("SELECT COUNT(*) FROM jogos")
         total = (await cur.fetchone())[0]
         cur = await db.execute(
@@ -508,7 +643,7 @@ async def salvar_edicao(m, jid, field, value):
     allowed = {"nome", "categoria", "preco", "link", "descricao"}
     if field not in allowed:
         return await m.answer("Campo inválido. Use: nome, categoria, preco, link ou descricao.")
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
         row = await cur.fetchone()
         if not row:
@@ -547,7 +682,7 @@ async def cb_editar_escolhe_produto(c, state: FSMContext):
     if c.from_user.id != ADMIN_ID:
         return await c.answer("Sem autorização.", show_alert=True)
     jid = c.data.removeprefix("editprod_")
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
         row = await cur.fetchone()
     if not row:
@@ -569,7 +704,7 @@ async def cb_excluir_produto_confirmar(c):
     if c.from_user.id != ADMIN_ID:
         return await c.answer("Sem autorização.", show_alert=True)
     jid = c.data.removeprefix("delprod_")
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
         row = await cur.fetchone()
     if not row:
@@ -589,7 +724,7 @@ async def cb_excluir_produto_executar(c):
     if c.from_user.id != ADMIN_ID:
         return await c.answer("Sem autorização.", show_alert=True)
     jid = c.data.removeprefix("delconfirm_")
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
         row = await cur.fetchone()
         if not row:
@@ -633,7 +768,7 @@ async def cb_editar_categoria_direta(c):
     _, jid, cat = c.data.split("|", 2)
     if cat not in CATS and cat not in {"gratis", "dashboards"}:
         return await c.answer("Categoria inválida.", show_alert=True)
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
         row = await cur.fetchone()
         if not row:
@@ -681,7 +816,7 @@ async def processa_valor_edicao(m, state: FSMContext):
     else:
         new_value = value
     column = {"nome":"nome", "categoria":"cat", "preco":"preco", "link":"link", "descricao":"desc"}[field]
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
         row = await cur.fetchone()
         if not row:
@@ -721,7 +856,7 @@ async def cmd_preco(m):
             raise ValueError()
     except ValueError:
         return await m.answer("Preço inválido. Exemplo: /preco limbo | 5,99")
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid.lower(),))
         row = await cur.fetchone()
         if not row:
@@ -745,7 +880,7 @@ async def cmd_promocao(m):
             raise ValueError()
     except ValueError:
         return await m.answer("Confira o preço e a data. Use AAAA-MM-DD e uma data de hoje em diante.")
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute("SELECT nome, preco FROM jogos WHERE id = ?", (jid.lower(),))
         row = await cur.fetchone()
         if not row:
@@ -763,7 +898,7 @@ async def cmd_fim_promocao(m):
     jid = m.text.partition(" ")[2].strip().lower()
     if not jid:
         return await m.answer("Formato: /fim_promocao ID_DO_JOGO")
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
         row = await cur.fetchone()
         if not row:
@@ -782,7 +917,7 @@ async def cmd_status_produto(m):
         return await m.answer("Informe o ID. Consulte /produtos.")
     active = 0 if parts[0].lower().endswith("pausar") else 1
     jid = parts[1].strip().lower()
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         cur = await db.execute("SELECT nome FROM jogos WHERE id = ?", (jid,))
         row = await cur.fetchone()
         if not row:
@@ -812,7 +947,7 @@ async def cb_admin_help(c):
 async def cmd_estatisticas(m):
     if m.from_user.id != ADMIN_ID:
         return
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         res = await db.execute("SELECT cat FROM jogos WHERE preco > 0 AND active = 1")
         linhas = await res.fetchall()
     tot = len(linhas)
@@ -861,8 +996,7 @@ async def cmd_iniciar_cadastro(m, state: FSMContext):
         if not nome or not (link.startswith("https://") or link.startswith("http://") or link.startswith("tg://")):
             return await m.answer("⚠️ Confira o nome e o link. O link deve começar com https://, http:// ou tg://.")
         jid = slugify(nome)
-        async with aiosqlite.connect(DB) as db:
-            await db.execute(
+        async with dbconn() as db:            await db.execute(
                 "INSERT INTO jogos (id, nome, cat, preco, link, desc) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
                 (jid, nome, cat, preco, link, desc)
             )
@@ -936,7 +1070,7 @@ async def processa_desc(m, state: FSMContext):
     desc = m.text.strip()
     data = await state.get_data()
     await state.clear()
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         await db.execute(
             "INSERT INTO jogos (id, nome, cat, preco, link, desc) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
             (data['jid'], data['nome'], data['cat'], data['preco'], data['link'], desc)
@@ -963,16 +1097,18 @@ async def processa_encaminhado(m):
         val = float(preco_raw.replace(",", "."))
     except ValueError:
         return await m.answer("⚠️ Preco invalido na legenda.")
-    cat = normalizar_categoria(cat_raw) or "acao"
+    cat = normalizar_categoria(cat_raw)
+    if not cat:
+        return await m.answer("⚠️ Categoria inválida na legenda. Use uma destas: " + ", ".join(CATS.keys()) + ", gratis, dashboards.")
     origin = m.forward_origin
     chat_id = getattr(getattr(origin, "chat", None), "id", None)
     msg_id = getattr(origin, "message_id", None)
-    link = "https://t.me/c/4434900523/2"
-    if chat_id and msg_id:
-        c_str = str(chat_id).replace("-100", "").replace("-", "")
-        link = "https://t.me/c/" + c_str + "/" + str(msg_id)
+    if not (chat_id and msg_id):
+        return await m.answer("⚠️ Não consegui identificar o canal e a mensagem de origem. Encaminhe direto do canal privado (com a origem visível) ou use /cadastrar com o link.")
+    c_str = str(chat_id).replace("-100", "").replace("-", "")
+    link = "https://t.me/c/" + c_str + "/" + str(msg_id)
     jid = slugify(nome)
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         await db.execute(
             "INSERT INTO jogos (id, nome, cat, preco, link, desc) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
             (jid, nome, cat, val, link, desc)
@@ -991,7 +1127,7 @@ async def cmd_novo(m):
         val = float(p[3].replace(",", "."))
     except Exception:
         return await m.answer("⚠️ Preço inválido.")
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         await db.execute(
             "INSERT INTO jogos (id, nome, cat, preco, link, desc) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
             (p[0].lower(), p[1], p[2].lower(), val, p[4], p[5])
@@ -1014,7 +1150,7 @@ async def cmd_bs(m):
     t = m.text.replace("/buscar", "").strip()
     if not t:
         return await m.answer("Envie: `/buscar nome-do-jogo`", parse_mode="Markdown")
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         c = await db.execute("SELECT id, nome, preco, promo_price, promo_until FROM jogos WHERE nome LIKE ? AND active = 1 LIMIT 8", ("%" + t + "%",))
         rows = await c.fetchall()
     if not rows:
@@ -1062,11 +1198,11 @@ async def cb_jc(c):
 async def cb_in(c):
     jid = c.data.replace("info_", "")
     await c.answer()
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         res = await db.execute("SELECT nome, preco, desc, cat, link, promo_price, promo_until, active FROM jogos WHERE id = ?", (jid,))
         row = await res.fetchone()
     if not row:
-        return
+        return await c.message.answer("⚠️ Este produto não está mais disponível. Toque em /start para ver o catálogo atualizado.")
     n, p, d, ck, link, promo_price, promo_until, active = row
     if not active:
         return await c.message.answer("Este produto está temporariamente indisponível.")
@@ -1084,11 +1220,11 @@ async def cb_in(c):
 async def cb_getfree(c):
     jid = c.data.replace("getfree_", "")
     await c.answer("A enviar ficheiro...")
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         res = await db.execute("SELECT nome, link, active FROM jogos WHERE id = ?", (jid,))
         row = await res.fetchone()
     if not row:
-        return
+        return await c.message.answer("⚠️ Este produto não está mais disponível. Toque em /start para ver o catálogo atualizado.")
     n, link, active = row
     if not active:
         return await c.message.answer("Este produto está temporariamente indisponível.")
@@ -1120,11 +1256,11 @@ async def cb_px(c):
     await c.answer("A gerar Pix...")
     if not sdk:
         return await c.message.answer("❌ Pagamento indisponivel no momento. Tente novamente mais tarde.")
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         res = await db.execute("SELECT nome, preco, promo_price, promo_until, active FROM jogos WHERE id = ?", (jid,))
         row = await res.fetchone()
     if not row:
-        return
+        return await c.message.answer("⚠️ Este produto não está mais disponível. Toque em /start para ver o catálogo atualizado.")
     n, base_price, promo_price, promo_until, active = row
     if not active:
         return await c.message.answer("Este produto está temporariamente indisponível.")
@@ -1141,7 +1277,7 @@ async def cb_px(c):
         pid, px = p["id"], p["point_of_interaction"]["transaction_data"]["qr_code"]
     except Exception as e:
         return await c.message.edit_text("❌ Erro Pix: " + str(e))
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         await db.execute("INSERT INTO pedidos (pid, uid, jid, st) VALUES (?, ?, ?, 'pending')", (pid, c.from_user.id, jid))
         await db.commit()
     qr = "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" + urllib.parse.quote(px)
@@ -1167,7 +1303,7 @@ async def cb_ck(c):
     if status_pagamento != "approved":
         return await c.answer("⏳ Aguardando compensacao Pix...", show_alert=True)
     await notify_admin_sale(pid, resp)
-    async with aiosqlite.connect(DB) as db:
+    async with dbconn() as db:
         res = await db.execute("SELECT uid, jid, st FROM pedidos WHERE pid = ?", (pid,))
         ped = await res.fetchone()
         if not ped:
@@ -1190,7 +1326,7 @@ async def cb_ck(c):
         print("Falha na entrega do pedido", pid, ":", e)
         entregue = False
     if entregue:
-        async with aiosqlite.connect(DB) as db:
+        async with dbconn() as db:
             await db.execute("UPDATE pedidos SET st = 'delivered' WHERE pid = ? AND uid = ?", (pid, c.from_user.id))
             await db.commit()
         nav = IKM(inline_keyboard=[
@@ -1223,6 +1359,27 @@ async def cb_ti(c):
 @dp.callback_query(F.data == "noop")
 async def cb_np(c):
     await c.answer()
+
+class LogClicks(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        try:
+            print("clique:", event.data, "usuario:", event.from_user.id)
+        except Exception:
+            pass
+        return await handler(event, data)
+
+dp.callback_query.outer_middleware(LogClicks())
+
+@dp.errors()
+async def on_error(event: ErrorEvent):
+    logging.error("Erro em handler do Telegram: %r", event.exception, exc_info=event.exception)
+    cq = getattr(event.update, "callback_query", None)
+    if cq:
+        try:
+            await cq.answer("⚠️ Ocorreu um erro. Tente novamente em instantes.", show_alert=True)
+        except Exception:
+            pass
+    return True
 
 async def ping(request):
     return web.Response(text="Online!")
@@ -1276,7 +1433,7 @@ async def mercadopago_webhook(request):
         if payment_status == "approved":
             # Mercado Pago can notify very quickly; if the order row has not
             # been saved yet, return 5xx so the provider can retry the event.
-            async with aiosqlite.connect(DB) as db:
+            async with dbconn() as db:
                 cur = await db.execute("SELECT 1 FROM pedidos WHERE pid = ?", (int(payment_id),))
                 order_exists = await cur.fetchone()
             if not order_exists:
@@ -1300,6 +1457,26 @@ def make_web_app():
     app.router.add_post(WEBHOOK_PATH, telegram_webhook)
     return app
 
+async def registrar_webhook(webhook_url):
+    """Register the Telegram webhook, retrying forever on network errors."""
+    tentativa = 0
+    while True:
+        tentativa += 1
+        try:
+            await bot.set_webhook(
+                url=webhook_url,
+                secret_token=WEBHOOK_SECRET,
+                max_connections=1,
+                drop_pending_updates=False,
+                request_timeout=30,
+            )
+            print("🚀 Webhook do Telegram configurado com segurança.")
+            return
+        except Exception as e:
+            espera = min(60, 5 * tentativa)
+            print("Falha ao registrar webhook (tentativa", tentativa, "):", repr(e), "- nova tentativa em", espera, "s")
+            await asyncio.sleep(espera)
+
 async def main():
     if not TOKEN:
         raise RuntimeError("BOT_TOKEN não configurado no ambiente.")
@@ -1313,13 +1490,7 @@ async def main():
         print("🚀 Servidor web ativo na porta " + str(PORT) + "!")
         webhook_url = PUBLIC_URL + WEBHOOK_PATH
         # Keep pending updates: never discard customer messages during deploys.
-        await bot.set_webhook(
-            url=webhook_url,
-            secret_token=WEBHOOK_SECRET,
-            max_connections=1,
-            drop_pending_updates=False,
-        )
-        print("🚀 Webhook do Telegram configurado com segurança.")
+        webhook_task = asyncio.create_task(registrar_webhook(webhook_url))
         await asyncio.Event().wait()
     finally:
         await runner.cleanup()
@@ -1327,4 +1498,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
