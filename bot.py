@@ -499,6 +499,7 @@ async def cmd_admin(m):
         reply_markup=kb_admin(), parse_mode="Markdown"
     )
 
+
 @dp.callback_query(F.data == "adm_cadastrar")
 async def cb_admin_cadastrar(c, state: FSMContext):
     if c.from_user.id != ADMIN_ID:
@@ -996,7 +997,8 @@ async def cmd_iniciar_cadastro(m, state: FSMContext):
         if not nome or not (link.startswith("https://") or link.startswith("http://") or link.startswith("tg://")):
             return await m.answer("⚠️ Confira o nome e o link. O link deve começar com https://, http:// ou tg://.")
         jid = slugify(nome)
-        async with dbconn() as db:            await db.execute(
+        async with dbconn() as db:
+            await db.execute(
                 "INSERT INTO jogos (id, nome, cat, preco, link, desc) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET nome=excluded.nome, cat=excluded.cat, preco=excluded.preco, link=excluded.link, desc=excluded.desc",
                 (jid, nome, cat, preco, link, desc)
             )
@@ -1498,3 +1500,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
