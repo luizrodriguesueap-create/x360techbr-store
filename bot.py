@@ -371,14 +371,19 @@ async def init_db():
                         "preco DOUBLE PRECISION, link TEXT, desc TEXT, promo_price DOUBLE PRECISION, "
                         "promo_until TEXT, active INTEGER NOT NULL DEFAULT 1)"
                     )
+                    await db.execute("ALTER TABLE jogos ADD COLUMN IF NOT EXISTS active INTEGER NOT NULL DEFAULT 1")
+                    await db.execute("ALTER TABLE jogos ADD COLUMN IF NOT EXISTS promo_price DOUBLE PRECISION")
+                    await db.execute("ALTER TABLE jogos ADD COLUMN IF NOT EXISTS promo_until TEXT")
                     await db.execute(
                         "CREATE TABLE IF NOT EXISTS pedidos (pid BIGINT PRIMARY KEY, uid BIGINT, jid TEXT, "
                         "st TEXT, admin_notified INTEGER NOT NULL DEFAULT 0)"
                     )
+                    await db.execute("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS admin_notified INTEGER NOT NULL DEFAULT 0")
                     for jid, nome, cat, preco, link, desc in PRODUTOS_PADRAO:
                         await db.execute(
                             "INSERT INTO jogos (id, nome, cat, preco, link, desc, active) "
-                            "VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT (id) DO NOTHING",
+                            "VALUES (?, ?, ?, ?, ?, ?, 1) "
+                            "ON CONFLICT (id) DO UPDATE SET active = 1, nome = EXCLUDED.nome, cat = EXCLUDED.cat, desc = EXCLUDED.desc",
                             (jid, nome, cat, preco, link, desc)
                         )
                     await db.commit()
@@ -408,7 +413,8 @@ async def init_db():
         for jid, nome, cat, preco, link, desc in PRODUTOS_PADRAO:
             await db.execute(
                 "INSERT INTO jogos (id, nome, cat, preco, link, desc, active) "
-                "VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT (id) DO NOTHING",
+                "VALUES (?, ?, ?, ?, ?, ?, 1) "
+                "ON CONFLICT (id) DO UPDATE SET active = 1, nome = excluded.nome, cat = excluded.cat, desc = excluded.desc",
                 (jid, nome, cat, preco, link, desc)
             )
         await db.commit()
@@ -467,7 +473,6 @@ async def notify_admin_sale(pid, payment=None):
         return True
 
 USER_ACTIVE_MSG = {}
-BANNER_FILE = "banner.jpg"
 ANIMACAO_BANNER = os.getenv("BANNER_URL", "https://media1.tenor.com/m/25kripDF95UAAAAC/xbox-microsoft.gif").strip()
 
 async def apagar_msg_anterior(user_id, chat_id):
@@ -481,21 +486,6 @@ async def apagar_msg_anterior(user_id, chat_id):
 
 async def mostrar_menu_inicial(chat_id, user_id):
     await apagar_msg_anterior(user_id, chat_id)
-    if os.path.exists(BANNER_FILE):
-        try:
-            from aiogram.types import FSInputFile
-            photo = FSInputFile(BANNER_FILE)
-            msg = await bot.send_photo(
-                chat_id=chat_id,
-                photo=photo,
-                caption=TXT_INI,
-                reply_markup=kb_inicio(),
-                parse_mode="Markdown"
-            )
-            USER_ACTIVE_MSG[user_id] = msg.message_id
-            return msg
-        except Exception as e:
-            print("Falha ao enviar banner exclusivo local:", e)
     if ANIMACAO_BANNER:
         try:
             msg = await bot.send_animation(
