@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 MP_KEY = os.getenv("MP_ACCESS_TOKEN", "").strip()
 PORT = int(os.getenv("PORT", 10000))
-ADMIN_ID = 1858295769
+ADMIN_ID = int(os.getenv("ADMIN_ID", "1858295769"))
 
 sdk = mercadopago.SDK(MP_KEY) if MP_KEY else None
 bot = Bot(token=TOKEN)
@@ -156,13 +156,13 @@ def dbconn():
 
 TXT_INI = (
     "🎮 **X360 TECH BR | Loja Oficial**\n"
-    "━━━━━━━━━━━━━━━━━━━━━━\n"
-    "⚡ O seu Xbox 360 no nivel maximo!\n\n"
-    "🟢 **Entrega Automatica via Pix** (24/7)\n"
-    "📦 **Formatos:** GOD e XEX p/ Pendrive/HD\n"
-    "🎁 **Desbloqueios e Dashboards Gratuitos**\n"
-    "━━━━━━━━━━━━━━━━━━━━━━\n"
-    "👇 _Toque numa opcao abaixo:_"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "⚡ **O seu Xbox 360 no nível máximo!**\n\n"
+    "🟢 **Entrega Automática via Pix** (24/7 imediata)\n"
+    "📦 **Formatos:** GOD e XEX prontos p/ Pen Drive ou HD\n"
+    "🎁 **Desbloqueios e Dashboards 100% Gratuitos**\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "👇 _Escolha uma das opções abaixo no menu:_"
 )
 
 CATS = {
@@ -398,19 +398,17 @@ async def notify_admin_sale(pid, payment=None):
 
 def kb_inicio():
     return IKM(inline_keyboard=[
-        [btn("🟢 Desbloqueios (Gratis)", cb="menu_desb", s="success")],
-        [btn("🟢 Dashboards", cb="menu_dash", s="success")],
-        [btn("🔵 Catalogo de Jogos (GOD / XEX)", cb="menu_cat", s="primary")],
-        [btn("🛠️ Jogos Modificados para Xbox 360", cb="c_modificados_1", s="primary")],
-        [btn("🛰️ Servidores Furtivos", cb="c_servidores_furtivos_1", s="success")],
+        [btn("🎮 Catálogo Completo de Jogos", cb="menu_cat", s="primary")],
+        [btn("🛠️ Jogos Modificados (Mods/PT-BR)", cb="c_modificados_1", s="primary"), btn("🛰️ Servidores Furtivos", cb="c_servidores_furtivos_1", s="success")],
+        [btn("🎁 Desbloqueios Grátis", cb="menu_desb", s="success"), btn("🟢 Dashboards Grátis", cb="menu_dash", s="success")],
         [btn("🔍 Pesquisar Jogo", cb="ajuda_b"), btn("📖 Como Instalar", cb="tut_inst")]
     ])
 
 def kb_desb():
     return IKM(inline_keyboard=[
-        [btn("🟢 Desbloqueio AbadAvatar", cb="info_abadavatar", s="success")],
+        [btn("🟢 Desbloqueio BadAvatar", cb="info_abadavatar", s="success")],
         [btn("🟢 Desbloqueio Rock Band", cb="info_rockband", s="success")],
-        [btn("◀️ Voltar ao Inicio", cb="voltar_ini")]
+        [btn("◀️ Voltar ao Início", cb="voltar_ini")]
     ])
 
 async def kb_dash():
@@ -424,8 +422,8 @@ async def kb_dash():
     for jid, nome in produtos:
         botoes.append([btn("🟢 " + str(nome), cb="info_" + str(jid), s="success")])
     if not produtos:
-        botoes.append([btn("ℹ️ Nenhum dashboard disponível", cb="noop")])
-    botoes.append([btn("◀️ Voltar ao Inicio", cb="voltar_ini")])
+        botoes.append([btn("ℹ️ Nenhum dashboard disponível no momento", cb="noop")])
+    botoes.append([btn("◀️ Voltar ao Início", cb="voltar_ini")])
     return IKM(inline_keyboard=botoes)
 
 def kb_categorias():
@@ -435,8 +433,8 @@ def kb_categorias():
         g.append([btn(CATS[k[i]], cb="c_" + k[i] + "_1"), btn(CATS[k[i+1]], cb="c_" + k[i+1] + "_1")])
     if len(k) % 2:
         g.append([btn(CATS[k[-1]], cb="c_" + k[-1] + "_1")])
-    g.append([btn("🟢 Ver Desbloqueios", cb="menu_desb", s="success")])
-    g.append([btn("◀️ Voltar ao Inicio", cb="voltar_ini")])
+    g.append([btn("🎁 Desbloqueios & Dashboards", cb="menu_desb", s="success")])
+    g.append([btn("◀️ Voltar ao Início", cb="voltar_ini")])
     return IKM(inline_keyboard=g)
 
 def kb_escolher_categoria():
@@ -461,19 +459,24 @@ async def kb_lista(ck, pg=1):
         jid_item = str(r[0])
         nome_item = str(r[1])
         preco_item = preco_efetivo(r[2], r[3], r[4])
-        label_btn = ("🔥 " if preco_item < float(r[2] or 0) else "🔵 ") + nome_item + " - R$ " + f"{preco_item:.2f}"
+        if preco_item == 0:
+            label_btn = f"🎁 {nome_item} • Grátis"
+        elif preco_item < float(r[2] or 0):
+            label_btn = f"🔥 {nome_item} • R$ {preco_item:.2f}"
+        else:
+            label_btn = f"🎮 {nome_item} • R$ {preco_item:.2f}"
         b.append([btn(label_btn, cb="info_" + jid_item, s="primary")])
     tot_p = max(1, (tot + 5) // 6)
     nav = []
     if pg > 1:
-        nav.append(btn("⬅️ Anterior", cb="c_" + str(ck) + "_" + str(pg-1)))
+        nav.append(btn("◀️ Anterior", cb="c_" + str(ck) + "_" + str(pg-1)))
     if tot_p > 1:
         nav.append(btn("📄 " + str(pg) + "/" + str(tot_p), cb="noop"))
     if pg < tot_p:
-        nav.append(btn("Proxima ➡️", cb="c_" + str(ck) + "_" + str(pg+1)))
+        nav.append(btn("Próxima ▶️", cb="c_" + str(ck) + "_" + str(pg+1)))
     if nav:
         b.append(nav)
-    b.append([btn("◀️ Voltar as Categorias", cb="menu_cat")])
+    b.append([btn("📂 Categorias", cb="menu_cat"), btn("🏠 Início", cb="voltar_ini")])
     return IKM(inline_keyboard=b), tot
 
 async def safe_edit(cb, text, markup):
@@ -1170,17 +1173,38 @@ async def cmd_bs(m):
 @dp.callback_query(F.data == "menu_desb")
 async def cb_db(c):
     await c.answer()
-    await safe_edit(c, "🎁 **Desbloqueios Gratuitos:**\nEscolha o metodo:", kb_desb())
+    t = (
+        "🎁 **DESBLOQUEIOS GRATUITOS — X360 TECH BR**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Escolha abaixo o método de desbloqueio que deseja baixar:\n\n"
+        "🟢 **BadAvatar:** Desbloqueio sem chip via perfil modificado.\n"
+        "🟢 **Rock Band:** Desbloqueio via exploit do jogo Rock Band.\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Toque em uma das opções para receber os arquivos e instruções:"
+    )
+    await safe_edit(c, t, kb_desb())
 
 @dp.callback_query(F.data == "menu_dash")
 async def cb_dh(c):
     await c.answer()
-    await safe_edit(c, "🎁 **Dashboards Gratuitas:**\nEscolha a interface:", await kb_dash())
+    t = (
+        "🟢 **DASHBOARDS GRATUITAS — X360 TECH BR**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Interfaces personalizadas para turbinar o seu Xbox 360 (Aurora, Freestyle, Series360, etc.):\n\n"
+        "Escolha a dashboard que deseja instalar no seu console:"
+    )
+    await safe_edit(c, t, await kb_dash())
 
 @dp.callback_query(F.data == "menu_cat")
 async def cb_ct(c):
     await c.answer()
-    await safe_edit(c, "📂 **Categorias de Jogos:**", kb_categorias())
+    t = (
+        "📂 **CATÁLOGO DE JOGOS POR CATEGORIA**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Explore nossos jogos prontos para Pen Drive e HD Externo.\n"
+        "Escolha um gênero abaixo:"
+    )
+    await safe_edit(c, t, kb_categorias())
 
 @dp.callback_query(F.data.regexp(r"^c_.+_\d+$"))
 async def cb_jc(c):
@@ -1193,7 +1217,16 @@ async def cb_jc(c):
     await c.answer()
     mk, tot = await kb_lista(ck, pg)
     nom = CATS.get(ck, "Jogos")
-    t = "📂 **" + str(nom) + "**" if tot > 0 else "📂 **" + str(nom) + "**\n\n_Vazio por enquanto._"
+    t = (
+        f"📂 **{nom}** (Página {pg})\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Toque no jogo desejado para ver detalhes e baixar:"
+    ) if tot > 0 else (
+        f"📂 **{nom}**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "_Nenhum jogo cadastrado nesta categoria no momento._\n"
+        "Novos títulos sendo adicionados em breve!"
+    )
     await safe_edit(c, t, mk)
 
 @dp.callback_query(F.data.startswith("info_"))
@@ -1210,12 +1243,45 @@ async def cb_in(c):
         return await c.message.answer("Este produto está temporariamente indisponível.")
     preco_atual = preco_efetivo(p, promo_price, promo_until)
     v = "menu_desb" if ck == "gratis" else ("menu_dash" if ck == "dashboards" else "c_" + str(ck) + "_1")
+    
+    desc_limpa = str(d or "").strip()
+    img_prefix = ""
+    match_img = re.match(r"^(\[[\u200b\s]*\]\([^)]+\))", desc_limpa)
+    if match_img:
+        img_prefix = match_img.group(1) + "\n"
+        desc_limpa = desc_limpa[len(match_img.group(1)):].strip()
+
     if p == 0.0:
-        tx = "🎁 **" + str(n) + "** (Gratis)\n\n📝 " + str(d)
-        b = [[btn("🟢 Receber Ficheiro Agora", cb="getfree_" + str(jid), s="success")], [btn("◀️ Voltar", cb=v)]]
+        tx = (
+            f"{img_prefix}"
+            f"🎁 **{n}** (100% Gratuito)\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📝 **Detalhes:**\n{desc_limpa or 'Sem descrição adicional.'}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "👇 _Toque no botão abaixo para receber o download na hora:_"
+        )
+        b = [
+            [btn("📥 Baixar Gratuitamente Agora", cb="getfree_" + str(jid), s="success")],
+            [btn("◀️ Voltar", cb=v), btn("🏠 Menu Inicial", cb="voltar_ini")]
+        ]
     else:
-        tx = "🎮 **" + str(n) + "**\n" + texto_preco(p, promo_price, promo_until) + " (GOD / XEX)\n\n📝 " + str(d)
-        b = [[btn("🟢 Pagar R$ " + f"{preco_atual:.2f}" + " via Pix", cb="pix_" + str(jid), s="success")], [btn("◀️ Voltar", cb=v)]]
+        tx_preco = texto_preco(p, promo_price, promo_until)
+        tx = (
+            f"{img_prefix}"
+            f"🎮 **{n}**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 **Preço:** {tx_preco}\n"
+            "📦 **Formato:** GOD / XEX (Pen Drive ou HD)\n"
+            "⚡ **Entrega:** Automática 24/7 via Pix imediato\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📝 **Sobre o Jogo:**\n{desc_limpa or 'Jogo completo pronto para jogar.'}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "👇 _Toque abaixo para gerar o Pix e receber na hora:_"
+        )
+        b = [
+            [btn(f"🟢 Pagar R$ {preco_atual:.2f} via Pix", cb="pix_" + str(jid), s="success")],
+            [btn("◀️ Voltar", cb=v), btn("🔍 Buscar Outro", cb="ajuda_b")]
+        ]
     await safe_edit(c, tx, IKM(inline_keyboard=b))
 
 @dp.callback_query(F.data.startswith("getfree_"))
@@ -1242,11 +1308,11 @@ async def cb_getfree(c):
         entregue = False
     if entregue:
         nav = IKM(inline_keyboard=[
-            [btn("🔵 Catálogo de Jogos", cb="menu_cat", s="primary")],
-            [btn("🟢 Voltar ao Início", cb="voltar_ini", s="success")]
+            [btn("🎮 Catálogo de Jogos", cb="menu_cat", s="primary")],
+            [btn("🏠 Voltar ao Início", cb="voltar_ini", s="success")]
         ])
         await c.message.answer(
-            "✅ Conteúdo enviado! O que deseja fazer agora?",
+            "✅ Conteúdo enviado com sucesso!\nO que deseja fazer agora?",
             reply_markup=nav
         )
     else:
@@ -1267,7 +1333,7 @@ async def cb_px(c):
     if not active:
         return await c.message.answer("Este produto está temporariamente indisponível.")
     pr = preco_efetivo(base_price, promo_price, promo_until)
-    await c.message.edit_text("⏳ A ligar ao Mercado Pago...")
+    await c.message.edit_text("⏳ Conectando ao Mercado Pago...")
     pdata = {
         "transaction_amount": float(pr),
         "description": "X360 - " + str(n),
@@ -1283,9 +1349,26 @@ async def cb_px(c):
         await db.execute("INSERT INTO pedidos (pid, uid, jid, st) VALUES (?, ?, ?, 'pending')", (pid, c.from_user.id, jid))
         await db.commit()
     qr = "https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=" + urllib.parse.quote(px)
-    kb = IKM(inline_keyboard=[[btn("🟢 Ja Paguei (Liberar Download)", cb="chk_" + str(pid), s="success")], [btn("◀️ Cancelar", cb="voltar_ini")]])
+    kb = IKM(inline_keyboard=[
+        [btn("🟢 Já Paguei (Liberar Download)", cb="chk_" + str(pid), s="success")],
+        [btn("❌ Cancelar Pedido", cb="voltar_ini")]
+    ])
     await c.message.delete()
-    caption_txt = "🎮 **" + str(n) + "**\n" + texto_preco(base_price, promo_price, promo_until) + "\n\n`" + str(px) + "`"
+    caption_txt = (
+        "⚡ **PAGAMENTO PIX — X360 TECH BR**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎮 **Produto:** {n}\n"
+        f"💰 **Valor:** R$ {pr:.2f}\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📱 **Pix Copia e Cola:**\n"
+        f"`{px}`\n"
+        "👆 _(Toque no código acima para copiar automaticamente)_\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "⏳ **Como pagar:**\n"
+        "1. Abra o app do seu banco e escolha **Pix Copia e Cola**.\n"
+        "2. Cole o código copiado e confirme o pagamento.\n"
+        "3. Em poucos segundos o download é liberado automaticamente!"
+    )
     await c.message.answer_photo(photo=qr, caption=caption_txt, reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("chk_"))
@@ -1303,7 +1386,7 @@ async def cb_ck(c):
     except Exception:
         return await c.answer("Erro ao consultar Mercado Pago. Tente novamente.", show_alert=True)
     if status_pagamento != "approved":
-        return await c.answer("⏳ Aguardando compensacao Pix...", show_alert=True)
+        return await c.answer("⏳ Aguardando compensação do Pix... Tente em instantes.", show_alert=True)
     await notify_admin_sale(pid, resp)
     async with dbconn() as db:
         res = await db.execute("SELECT uid, jid, st FROM pedidos WHERE pid = ?", (pid,))
@@ -1320,7 +1403,7 @@ async def cb_ck(c):
         if not jogo:
             return await c.answer("Produto nao encontrado. Contate o administrador.", show_alert=True)
         n, l = jogo
-    await c.answer("Pagamento confirmado; enviando produto...")
+    await c.answer("Pagamento confirmado; enviando seu jogo...")
     await c.message.answer("🎉 **PAGAMENTO CONFIRMADO!**\n\n🎮 A entregar: **" + str(n) + "**...", parse_mode="Markdown")
     try:
         entregue = await entregar_conteudo(c.from_user.id, l, n)
@@ -1332,13 +1415,23 @@ async def cb_ck(c):
             await db.execute("UPDATE pedidos SET st = 'delivered' WHERE pid = ? AND uid = ?", (pid, c.from_user.id))
             await db.commit()
         nav = IKM(inline_keyboard=[
-            [btn("🔵 Catálogo de Jogos", cb="menu_cat", s="primary")],
-            [btn("🟢 Voltar ao Início", cb="voltar_ini", s="success")]
+            [btn("🎮 Ver Catálogo de Jogos", cb="menu_cat", s="primary")],
+            [btn("📖 Guia de Instalação", cb="tut_inst"), btn("🏠 Início", cb="voltar_ini", s="success")]
         ])
-        await c.message.answer(
-            "✅ Entrega concluída. Guarde esta conversa para consultar o produto.\n\nO que deseja fazer agora?",
-            reply_markup=nav
+        msg_sucesso = (
+            "🎉 **PAGAMENTO CONFIRMADO & ENTREGA CONCLUÍDA!**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎮 **Produto:** {n}\n"
+            "📦 Seus arquivos/links foram entregues na mensagem acima!\n\n"
+            "💡 **Dicas Rápidas de Instalação:**\n"
+            "• Pen Drive ou HD Externo formatado em **FAT32**.\n"
+            "• **Formato GOD:** copie para `Content\\0000000000000000`.\n"
+            "• **Formato XEX:** copie para a pasta `Games`.\n"
+            "• Abra a **Aurora** ou **Freestyle** para escanear.\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Obrigado por comprar na **X360 TECH BR**! Bom jogo! 🕹️"
         )
+        await c.message.answer(msg_sucesso, reply_markup=nav, parse_mode="Markdown")
     else:
         await c.message.answer("⚠️ O pagamento foi confirmado, mas o envio automatico falhou. Seu pedido nao foi marcado como entregue. Contate o administrador para concluir a entrega.")
 
@@ -1350,13 +1443,50 @@ async def cb_vi(c):
 @dp.callback_query(F.data == "ajuda_b")
 async def cb_ab(c):
     await c.answer()
-    await safe_edit(c, "🔍 **Como Pesquisar:**\nEnvie `/buscar` e o nome.\n\nExemplo: `/buscar limbo`", IKM(inline_keyboard=[[btn("◀️ Voltar", cb="voltar_ini")]]))
+    t = (
+        "🔍 **BUSCA RÁPIDA DE JOGOS — X360 TECH BR**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Para encontrar qualquer título rapidamente, basta digitar no chat:\n\n"
+        "`/buscar nome do jogo`\n\n"
+        "Exemplos:\n"
+        "• `/buscar black`\n"
+        "• `/buscar gta`\n"
+        "• `/buscar forza`\n"
+        "• `/buscar resident`\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Ou toque abaixo para navegar por categorias:"
+    )
+    b = [
+        [btn("📂 Ver por Categorias", cb="menu_cat", s="primary")],
+        [btn("◀️ Voltar ao Início", cb="voltar_ini")]
+    ]
+    await safe_edit(c, t, IKM(inline_keyboard=b))
 
 @dp.callback_query(F.data == "tut_inst")
 async def cb_ti(c):
     await c.answer()
-    t = "📖 **Tutorial Rapido:**\n\n1. Pendrive em FAT32.\n2. **GOD:** em `Content\\0000000000000000`\n3. **XEX:** em `Games`\n4. Abra a Aurora ou Nexus!"
-    await safe_edit(c, t, IKM(inline_keyboard=[[btn("◀️ Voltar", cb="voltar_ini")]]))
+    t = (
+        "📖 **GUIA DE INSTALAÇÃO — XBOX 360 (RGH / JTAG)**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "💾 **1. Preparar Pen Drive ou HD Externo:**\n"
+        "• Deve estar formatado no formato **FAT32** (o Xbox 360 não reconhece NTFS ou exFAT).\n\n"
+        "📦 **2. Jogos em Formato GOD (Pastas de Números):**\n"
+        "• Se o jogo veio com pastas como `4D5307E6\\00007000...`:\n"
+        "• Copie para: `Raiz_Do_PenDrive\\Content\\0000000000000000\\`\n\n"
+        "📁 **3. Jogos em Formato XEX (Com arquivo default.xex):**\n"
+        "• Crie uma pasta chamada `Games` na raiz do seu Pen Drive.\n"
+        "• Copie a pasta do jogo para lá: `Raiz_Do_PenDrive\\Games\\NomeDoJogo\\`\n\n"
+        "⚡ **4. Rodando no Console:**\n"
+        "• Conecte no Xbox 360 e abra a sua **Aurora** ou **Freestyle Dash**.\n"
+        "• O console escaneará e o jogo aparecerá na sua lista com a capa pronta!\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Precisa de ajuda? Fale conosco a qualquer momento!"
+    )
+    b = [
+        [btn("🎮 Ver Catálogo de Jogos", cb="menu_cat", s="primary")],
+        [btn("◀️ Voltar ao Início", cb="voltar_ini")]
+    ]
+    await safe_edit(c, t, IKM(inline_keyboard=b))
 
 @dp.callback_query(F.data == "noop")
 async def cb_np(c):
