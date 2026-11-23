@@ -467,7 +467,8 @@ async def notify_admin_sale(pid, payment=None):
         return True
 
 USER_ACTIVE_MSG = {}
-ANIMACAO_BANNER = os.getenv("BANNER_URL", "https://media1.tenor.com/m/gS0yP0EGHwIAAAAC/xbox360-startup.gif").strip()
+BANNER_FILE = "banner.jpg"
+ANIMACAO_BANNER = os.getenv("BANNER_URL", "https://media1.tenor.com/m/25kripDF95UAAAAC/xbox-microsoft.gif").strip()
 
 async def apagar_msg_anterior(user_id, chat_id):
     prev_id = USER_ACTIVE_MSG.get(user_id)
@@ -480,6 +481,21 @@ async def apagar_msg_anterior(user_id, chat_id):
 
 async def mostrar_menu_inicial(chat_id, user_id):
     await apagar_msg_anterior(user_id, chat_id)
+    if os.path.exists(BANNER_FILE):
+        try:
+            from aiogram.types import FSInputFile
+            photo = FSInputFile(BANNER_FILE)
+            msg = await bot.send_photo(
+                chat_id=chat_id,
+                photo=photo,
+                caption=TXT_INI,
+                reply_markup=kb_inicio(),
+                parse_mode="Markdown"
+            )
+            USER_ACTIVE_MSG[user_id] = msg.message_id
+            return msg
+        except Exception as e:
+            print("Falha ao enviar banner exclusivo local:", e)
     if ANIMACAO_BANNER:
         try:
             msg = await bot.send_animation(
