@@ -396,6 +396,42 @@ async def notify_admin_sale(pid, payment=None):
         print("Notificacao de venda enviada ao administrador para pedido", pid)
         return True
 
+USER_ACTIVE_MSG = {}
+ANIMACAO_BANNER = os.getenv("BANNER_URL", "https://media1.tenor.com/m/25kripDF95UAAAAC/xbox-microsoft.gif").strip()
+
+async def apagar_msg_anterior(user_id, chat_id):
+    prev_id = USER_ACTIVE_MSG.get(user_id)
+    if prev_id:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=prev_id)
+        except Exception:
+            pass
+        USER_ACTIVE_MSG.pop(user_id, None)
+
+async def mostrar_menu_inicial(chat_id, user_id):
+    await apagar_msg_anterior(user_id, chat_id)
+    if ANIMACAO_BANNER:
+        try:
+            msg = await bot.send_animation(
+                chat_id=chat_id,
+                animation=ANIMACAO_BANNER,
+                caption=TXT_INI,
+                reply_markup=kb_inicio(),
+                parse_mode="Markdown"
+            )
+            USER_ACTIVE_MSG[user_id] = msg.message_id
+            return msg
+        except Exception as e:
+            print("Falha ao enviar animacao do banner:", e)
+    msg = await bot.send_message(
+        chat_id=chat_id,
+        text=TXT_INI,
+        reply_markup=kb_inicio(),
+        parse_mode="Markdown"
+    )
+    USER_ACTIVE_MSG[user_id] = msg.message_id
+    return msg
+
 def kb_inicio():
     return IKM(inline_keyboard=[
         [btn("🎮 Catálogo Completo de Jogos", cb="menu_cat", s="primary")],
@@ -480,12 +516,40 @@ async def kb_lista(ck, pg=1):
     return IKM(inline_keyboard=b), tot
 
 async def safe_edit(cb, text, markup):
+    msg = cb.message
+    user_id = cb.from_user.id
+    chat_id = msg.chat.id
+
+    # 1. Se a mensagem for mídia (animação/foto), tenta editar a legenda
+    if msg.photo or msg.animation or msg.video:
+        try:
+            await msg.edit_caption(caption=text, reply_markup=markup, parse_mode="Markdown")
+            USER_ACTIVE_MSG[user_id] = msg.message_id
+            return
+        except Exception:
+            pass
+    # 2. Se for texto puro, edita in-place
+    else:
+        try:
+            await msg.edit_text(text=text, reply_markup=markup, parse_mode="Markdown")
+            USER_ACTIVE_MSG[user_id] = msg.message_id
+            return
+        except Exception:
+            pass
+
+    # 3. Se falhou (ex: transição de mídia para texto), apaga a mensagem antiga para não poluir
     try:
-        await cb.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+        await msg.delete()
+    except Exception:
+        pass
+    try:
+        new_m = await bot.send_message(chat_id=chat_id, text=text, reply_markup=markup, parse_mode="Markdown")
+        USER_ACTIVE_MSG[user_id] = new_m.message_id
     except Exception:
         try:
-            await cb.message.delete()
-            await cb.message.answer(text, reply_markup=markup, parse_mode="Markdown")
+            clean_t = text.replace("*", "").replace("_", "").replace("`", "")
+            new_m = await bot.send_message(chat_id=chat_id, text=clean_t, reply_markup=markup)
+            USER_ACTIVE_MSG[user_id] = new_m.message_id
         except Exception:
             pass
 
@@ -1147,32 +1211,53 @@ async def cmd_st(m):
     except Exception:
         pass
     await bot.send_chat_action(chat_id=m.chat.id, action="typing")
-    await asyncio.sleep(0.3)
-    await m.answer(TXT_INI, reply_markup=kb_inicio(), parse_mode="Markdown")
+    await mostrar_menu_inicial(m.chat.id, m.from_user.id)
 
 @dp.message(Command("buscar"))
 async def cmd_bs(m):
+    try:
+        await m.delete()
+    except Exception:
+        pass
     t = m.text.replace("/buscar", "").strip()
     if not t:
-        return await m.answer("Envie: `/buscar nome-do-jogo`", parse_mode="Markdown")
+        msg_aviso = await m.answer("🔍 Envie o comando com o nome do jogo.\nExemplo: `/buscar gta`", parse_mode="Markdown")
+        await asyncio.sleep(4)
+        try:
+            await msg_aviso.delete()
+        except Exception:
+            pass
+        return
+    await apagar_msg_anterior(m.from_user.id, m.chat.id)
     async with dbconn() as db:
         c = await db.execute("SELECT id, nome, preco, promo_price, promo_until FROM jogos WHERE nome LIKE ? AND active = 1 LIMIT 8", ("%" + t + "%",))
         rows = await c.fetchall()
     if not rows:
-        return await m.answer("Nenhum jogo encontrado.")
+        msg = await m.answer(
+            f"🔍 **Nenhum jogo encontrado para:** `{t}`\n━━━━━━━━━━━━━━━━━━━━━━━━━\nTente pesquisar por uma palavra mais curta:",
+            reply_markup=IKM(inline_keyboard=[[btn("◀️ Voltar ao Início", cb="voltar_ini")]]),
+            parse_mode="Markdown"
+        )
+        USER_ACTIVE_MSG[m.from_user.id] = msg.message_id
+        return
     b = []
     for r in rows:
         jid_item = str(r[0])
         nome_item = str(r[1])
         preco_item = preco_efetivo(r[2], r[3], r[4])
-        label_btn = ("🔥 " if preco_item < float(r[2] or 0) else "🔵 ") + nome_item + " - R$ " + f"{preco_item:.2f}"
+        label_btn = ("🔥 " if preco_item < float(r[2] or 0) else "🎮 ") + nome_item + " • R$ " + f"{preco_item:.2f}"
         b.append([btn(label_btn, cb="info_" + jid_item, s="primary")])
-    b.append([btn("◀️ Voltar ao Inicio", cb="voltar_ini")])
-    await m.answer("Resultados para: `" + str(t) + "`", reply_markup=IKM(inline_keyboard=b), parse_mode="Markdown")
+    b.append([btn("◀️ Voltar ao Início", cb="voltar_ini")])
+    msg = await m.answer(
+        f"🔍 **Resultados para:** `{t}`\n━━━━━━━━━━━━━━━━━━━━━━━━━\nToque no jogo para ver detalhes e baixar:",
+        reply_markup=IKM(inline_keyboard=b),
+        parse_mode="Markdown"
+    )
+    USER_ACTIVE_MSG[m.from_user.id] = msg.message_id
 
 @dp.callback_query(F.data == "menu_desb")
 async def cb_db(c):
-    await c.answer()
+    await c.answer("🎁 Abrindo desbloqueios gratuitos...", show_alert=False)
     t = (
         "🎁 **DESBLOQUEIOS GRATUITOS — X360 TECH BR**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1186,7 +1271,7 @@ async def cb_db(c):
 
 @dp.callback_query(F.data == "menu_dash")
 async def cb_dh(c):
-    await c.answer()
+    await c.answer("🟢 Abrindo dashboards gratuitas...", show_alert=False)
     t = (
         "🟢 **DASHBOARDS GRATUITAS — X360 TECH BR**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1197,7 +1282,7 @@ async def cb_dh(c):
 
 @dp.callback_query(F.data == "menu_cat")
 async def cb_ct(c):
-    await c.answer()
+    await c.answer("📂 Abrindo categorias de jogos...", show_alert=False)
     t = (
         "📂 **CATÁLOGO DE JOGOS POR CATEGORIA**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1208,15 +1293,14 @@ async def cb_ct(c):
 
 @dp.callback_query(F.data.regexp(r"^c_.+_\d+$"))
 async def cb_jc(c):
-    # Category names may contain underscores (for example, mundo_aberto).
     match = re.fullmatch(r"c_(.+)_(\d+)", c.data)
     if not match:
-        await c.answer("Categoria invalida.", show_alert=True)
+        await c.answer("Categoria inválida.", show_alert=True)
         return
     ck, pg = match.group(1), int(match.group(2))
-    await c.answer()
-    mk, tot = await kb_lista(ck, pg)
     nom = CATS.get(ck, "Jogos")
+    await c.answer(f"🎮 Abrindo {nom}...", show_alert=False)
+    mk, tot = await kb_lista(ck, pg)
     t = (
         f"📂 **{nom}** (Página {pg})\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1232,7 +1316,7 @@ async def cb_jc(c):
 @dp.callback_query(F.data.startswith("info_"))
 async def cb_in(c):
     jid = c.data.replace("info_", "")
-    await c.answer()
+    await c.answer("⚡ Carregando jogo...", show_alert=False)
     async with dbconn() as db:
         res = await db.execute("SELECT nome, preco, desc, cat, link, promo_price, promo_until, active FROM jogos WHERE id = ?", (jid,))
         row = await res.fetchone()
@@ -1287,7 +1371,7 @@ async def cb_in(c):
 @dp.callback_query(F.data.startswith("getfree_"))
 async def cb_getfree(c):
     jid = c.data.replace("getfree_", "")
-    await c.answer("A enviar ficheiro...")
+    await c.answer("📥 Enviando arquivos...", show_alert=False)
     async with dbconn() as db:
         res = await db.execute("SELECT nome, link, active FROM jogos WHERE id = ?", (jid,))
         row = await res.fetchone()
@@ -1300,7 +1384,7 @@ async def cb_getfree(c):
         return await c.message.answer(
             "⚠️ O link deste conteúdo ainda está sendo corrigido. Nenhum arquivo foi enviado. Tente novamente mais tarde."
         )
-    await c.message.answer("📦 A preparar a entrega de: **" + str(n) + "**...")
+    await safe_edit(c, f"📦 **Enviando seu conteúdo:** {n}...\nAguarde só um instante!", IKM(inline_keyboard=[[btn("⏳ Aguarde...", cb="noop")]]))
     try:
         entregue = await entregar_conteudo(c.from_user.id, link, n)
     except Exception as e:
@@ -1311,19 +1395,16 @@ async def cb_getfree(c):
             [btn("🎮 Catálogo de Jogos", cb="menu_cat", s="primary")],
             [btn("🏠 Voltar ao Início", cb="voltar_ini", s="success")]
         ])
-        await c.message.answer(
-            "✅ Conteúdo enviado com sucesso!\nO que deseja fazer agora?",
-            reply_markup=nav
-        )
+        await safe_edit(c, f"✅ **Conteúdo de {n} enviado com sucesso!**\n\nO que deseja fazer agora?", nav)
     else:
-        await c.message.answer("⚠️ Não consegui concluir o envio. Tente novamente mais tarde.")
+        await safe_edit(c, "⚠️ Não consegui concluir o envio no momento. Tente novamente mais tarde.", IKM(inline_keyboard=[[btn("◀️ Voltar", cb="voltar_ini")]]))
 
 @dp.callback_query(F.data.startswith("pix_"))
 async def cb_px(c):
     jid = c.data.replace("pix_", "", 1)
-    await c.answer("A gerar Pix...")
+    await c.answer("⚡ Gerando cobrança Pix...", show_alert=False)
     if not sdk:
-        return await c.message.answer("❌ Pagamento indisponivel no momento. Tente novamente mais tarde.")
+        return await c.message.answer("❌ Pagamento indisponível no momento. Tente novamente mais tarde.")
     async with dbconn() as db:
         res = await db.execute("SELECT nome, preco, promo_price, promo_until, active FROM jogos WHERE id = ?", (jid,))
         row = await res.fetchone()
@@ -1333,7 +1414,7 @@ async def cb_px(c):
     if not active:
         return await c.message.answer("Este produto está temporariamente indisponível.")
     pr = preco_efetivo(base_price, promo_price, promo_until)
-    await c.message.edit_text("⏳ Conectando ao Mercado Pago...")
+    await safe_edit(c, "⏳ **Conectando ao Mercado Pago...**\nGerando seu QR Code e Pix Copia e Cola...", IKM(inline_keyboard=[[btn("⏳ Aguarde...", cb="noop")]]))
     pdata = {
         "transaction_amount": float(pr),
         "description": "X360 - " + str(n),
@@ -1344,7 +1425,7 @@ async def cb_px(c):
         p = sdk.payment().create(pdata).get("response", {})
         pid, px = p["id"], p["point_of_interaction"]["transaction_data"]["qr_code"]
     except Exception as e:
-        return await c.message.edit_text("❌ Erro Pix: " + str(e))
+        return await safe_edit(c, "❌ Erro ao gerar Pix: " + str(e), IKM(inline_keyboard=[[btn("◀️ Voltar", cb="voltar_ini")]]))
     async with dbconn() as db:
         await db.execute("INSERT INTO pedidos (pid, uid, jid, st) VALUES (?, ?, ?, 'pending')", (pid, c.from_user.id, jid))
         await db.commit()
@@ -1353,7 +1434,10 @@ async def cb_px(c):
         [btn("🟢 Já Paguei (Liberar Download)", cb="chk_" + str(pid), s="success")],
         [btn("❌ Cancelar Pedido", cb="voltar_ini")]
     ])
-    await c.message.delete()
+    try:
+        await c.message.delete()
+    except Exception:
+        pass
     caption_txt = (
         "⚡ **PAGAMENTO PIX — X360 TECH BR**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1369,7 +1453,8 @@ async def cb_px(c):
         "2. Cole o código copiado e confirme o pagamento.\n"
         "3. Em poucos segundos o download é liberado automaticamente!"
     )
-    await c.message.answer_photo(photo=qr, caption=caption_txt, reply_markup=kb, parse_mode="Markdown")
+    photo_msg = await c.message.answer_photo(photo=qr, caption=caption_txt, reply_markup=kb, parse_mode="Markdown")
+    USER_ACTIVE_MSG[c.from_user.id] = photo_msg.message_id
 
 @dp.callback_query(F.data.startswith("chk_"))
 async def cb_ck(c):
@@ -1377,39 +1462,47 @@ async def cb_ck(c):
     try:
         pid = int(raw_pid)
     except ValueError:
-        return await c.answer("Pedido invalido.", show_alert=True)
+        return await c.answer("Pedido inválido.", show_alert=True)
     if not sdk:
-        return await c.answer("Pagamento indisponivel no momento.", show_alert=True)
+        return await c.answer("Pagamento indisponível no momento.", show_alert=True)
     try:
         resp = sdk.payment().get(pid).get("response", {})
         status_pagamento = resp.get("status")
     except Exception:
         return await c.answer("Erro ao consultar Mercado Pago. Tente novamente.", show_alert=True)
     if status_pagamento != "approved":
-        return await c.answer("⏳ Aguardando compensação do Pix... Tente em instantes.", show_alert=True)
+        return await c.answer("⏳ Pagamento ainda não detectado. Se já pagou, aguarde 10 segundos e tente novamente!", show_alert=True)
+    await c.answer("🎉 Pagamento aprovado! Liberando download...", show_alert=False)
     await notify_admin_sale(pid, resp)
     async with dbconn() as db:
         res = await db.execute("SELECT uid, jid, st FROM pedidos WHERE pid = ?", (pid,))
         ped = await res.fetchone()
         if not ped:
-            return await c.answer("Pedido nao encontrado.", show_alert=True)
+            return await c.answer("Pedido não encontrado.", show_alert=True)
         owner_id, jid, status_pedido = ped
         if int(owner_id) != int(c.from_user.id):
-            return await c.answer("Este pedido pertence a outro usuario.", show_alert=True)
+            return await c.answer("Este pedido pertence a outro usuário.", show_alert=True)
         if status_pedido == "delivered":
-            return await c.answer("Este pedido ja foi entregue.", show_alert=True)
+            return await c.answer("Este pedido já foi entregue.", show_alert=True)
         r2 = await db.execute("SELECT nome, link FROM jogos WHERE id = ?", (jid,))
         jogo = await r2.fetchone()
         if not jogo:
-            return await c.answer("Produto nao encontrado. Contate o administrador.", show_alert=True)
+            return await c.answer("Produto não encontrado. Contate o administrador.", show_alert=True)
         n, l = jogo
-    await c.answer("Pagamento confirmado; enviando seu jogo...")
-    await c.message.answer("🎉 **PAGAMENTO CONFIRMADO!**\n\n🎮 A entregar: **" + str(n) + "**...", parse_mode="Markdown")
+    try:
+        await c.message.delete()
+    except Exception:
+        pass
+    msg_espera = await c.message.answer("🎉 **PAGAMENTO CONFIRMADO!**\n\n🎮 Enviando seus arquivos de **" + str(n) + "**...", parse_mode="Markdown")
     try:
         entregue = await entregar_conteudo(c.from_user.id, l, n)
     except Exception as e:
         print("Falha na entrega do pedido", pid, ":", e)
         entregue = False
+    try:
+        await msg_espera.delete()
+    except Exception:
+        pass
     if entregue:
         async with dbconn() as db:
             await db.execute("UPDATE pedidos SET st = 'delivered' WHERE pid = ? AND uid = ?", (pid, c.from_user.id))
@@ -1431,18 +1524,27 @@ async def cb_ck(c):
             "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "Obrigado por comprar na **X360 TECH BR**! Bom jogo! 🕹️"
         )
-        await c.message.answer(msg_sucesso, reply_markup=nav, parse_mode="Markdown")
+        rcpt = await c.message.answer(msg_sucesso, reply_markup=nav, parse_mode="Markdown")
+        USER_ACTIVE_MSG[c.from_user.id] = rcpt.message_id
     else:
-        await c.message.answer("⚠️ O pagamento foi confirmado, mas o envio automatico falhou. Seu pedido nao foi marcado como entregue. Contate o administrador para concluir a entrega.")
+        aviso = await c.message.answer("⚠️ O pagamento foi confirmado, mas o envio automático falhou. Contate o suporte para concluir a entrega.")
+        USER_ACTIVE_MSG[c.from_user.id] = aviso.message_id
 
 @dp.callback_query(F.data == "voltar_ini")
 async def cb_vi(c):
-    await c.answer()
-    await safe_edit(c, TXT_INI, kb_inicio())
+    await c.answer("🏠 Voltando ao menu inicial...", show_alert=False)
+    if c.message.animation or c.message.photo:
+        try:
+            await c.message.edit_caption(caption=TXT_INI, reply_markup=kb_inicio(), parse_mode="Markdown")
+            USER_ACTIVE_MSG[c.from_user.id] = c.message.message_id
+            return
+        except Exception:
+            pass
+    await mostrar_menu_inicial(c.message.chat.id, c.from_user.id)
 
 @dp.callback_query(F.data == "ajuda_b")
 async def cb_ab(c):
-    await c.answer()
+    await c.answer("🔍 Abrindo busca rápida...", show_alert=False)
     t = (
         "🔍 **BUSCA RÁPIDA DE JOGOS — X360 TECH BR**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1464,7 +1566,7 @@ async def cb_ab(c):
 
 @dp.callback_query(F.data == "tut_inst")
 async def cb_ti(c):
-    await c.answer()
+    await c.answer("📖 Abrindo guia de instalação...", show_alert=False)
     t = (
         "📖 **GUIA DE INSTALAÇÃO — XBOX 360 (RGH / JTAG)**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━\n"
