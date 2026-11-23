@@ -301,9 +301,67 @@ async def entregar_conteudo(user_id, link, nome_jogo):
         await bot.send_message(user_id, msg_dir, parse_mode="Markdown")
         return True
 
+PRODUTOS_PADRAO = [
+    (
+        "abadavatar",
+        "Desbloqueio BadAvatar (Sem Chip)",
+        "gratis",
+        0.00,
+        "https://t.me/c/4434900523/1",
+        "O mais novo método de desbloqueio para Xbox 360 sem chip e sem abrir o console! Roda homebrews e jogos via perfil modificado."
+    ),
+    (
+        "rockband",
+        "Desbloqueio Rock Band (Exploit)",
+        "gratis",
+        0.00,
+        "https://t.me/c/4434900523/1",
+        "Método de desbloqueio alternativo utilizando savegame modificado do jogo Rock Band para carregar XeXMenu."
+    ),
+    (
+        "aurora",
+        "Aurora Dashboard 0.7b.2 (PT-BR)",
+        "dashboards",
+        0.00,
+        "https://t.me/c/4434900523/1",
+        "A dashboard mais famosa e completa para Xbox 360 RGH/JTAG! Baixa capas automaticamente, suporte a plugins, emuladores e Xbox Unity."
+    ),
+    (
+        "nexus",
+        "Nexus Dashboard (Ultra Leve)",
+        "dashboards",
+        0.00,
+        "https://t.me/c/4434900523/1",
+        "Interface moderna, rápida e limpa para seu Xbox 360. Ideal para quem busca agilidade e praticidade."
+    ),
+    (
+        "series360",
+        "Series360 Dashboard (Estilo Xbox Series)",
+        "dashboards",
+        0.00,
+        "https://t.me/c/4434900523/1",
+        "A nova dashboard inspirada na interface dos consoles Xbox Series X|S! Visual moderno em 1080p nativo, blocos de atalhos e capas quadradas."
+    ),
+    (
+        "proto_stealth",
+        "Proto Stealth Server (100% Gratuito)",
+        "servidores_furtivos",
+        0.00,
+        "https://t.me/c/4434900523/1",
+        "Servidor furtivo 100% gratuito e seguro. Permite conectar seu Xbox 360 RGH à Xbox Live oficial para jogar online sem ban imediato."
+    ),
+    (
+        "stealth_vip",
+        "Servidor Furtivo VIP (No-KV / Bypass)",
+        "servidores_furtivos",
+        9.99,
+        "https://t.me/c/4434900523/1",
+        "Acesso VIP a servidor stealth premium com proteção de CPU key, sem necessidade de KV dedicada e alta estabilidade."
+    )
+]
+
 async def init_db():
-    """Create tables. No default products are ever inserted automatically:
-    the catalogue is exactly what the administrator registered."""
+    """Create tables and seed initial catalog items if they do not exist."""
     if USE_PG:
         for tentativa in range(1, 7):
             try:
@@ -317,6 +375,12 @@ async def init_db():
                         "CREATE TABLE IF NOT EXISTS pedidos (pid BIGINT PRIMARY KEY, uid BIGINT, jid TEXT, "
                         "st TEXT, admin_notified INTEGER NOT NULL DEFAULT 0)"
                     )
+                    for jid, nome, cat, preco, link, desc in PRODUTOS_PADRAO:
+                        await db.execute(
+                            "INSERT INTO jogos (id, nome, cat, preco, link, desc, active) "
+                            "VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT (id) DO NOTHING",
+                            (jid, nome, cat, preco, link, desc)
+                        )
                     await db.commit()
                 print("✅ Banco PostgreSQL pronto (dados persistentes).")
                 return
@@ -341,6 +405,12 @@ async def init_db():
             await db.execute("ALTER TABLE jogos ADD COLUMN promo_until TEXT")
         if "active" not in game_col_names:
             await db.execute("ALTER TABLE jogos ADD COLUMN active INTEGER NOT NULL DEFAULT 1")
+        for jid, nome, cat, preco, link, desc in PRODUTOS_PADRAO:
+            await db.execute(
+                "INSERT INTO jogos (id, nome, cat, preco, link, desc, active) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1) ON CONFLICT (id) DO NOTHING",
+                (jid, nome, cat, preco, link, desc)
+            )
         await db.commit()
 
 SALE_NOTIFY_LOCK = asyncio.Lock()
@@ -397,7 +467,7 @@ async def notify_admin_sale(pid, payment=None):
         return True
 
 USER_ACTIVE_MSG = {}
-ANIMACAO_BANNER = os.getenv("BANNER_URL", "https://media1.tenor.com/m/25kripDF95UAAAAC/xbox-microsoft.gif").strip()
+ANIMACAO_BANNER = os.getenv("BANNER_URL", "https://media1.tenor.com/m/gS0yP0EGHwIAAAAC/xbox360-startup.gif").strip()
 
 async def apagar_msg_anterior(user_id, chat_id):
     prev_id = USER_ACTIVE_MSG.get(user_id)
